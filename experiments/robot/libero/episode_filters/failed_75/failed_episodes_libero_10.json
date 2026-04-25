@@ -1,0 +1,153 @@
+{
+  "description": "75-episode failure set used for anchor_sweep / rewind_fixed comparison.",
+  "suite": "libero_10",
+  "episodes": [
+    {
+      "suite": "libero_10",
+      "task_id": 0,
+      "task_description": "put both the alphabet soup and the tomato sauce in the basket",
+      "episode_idx": 14,
+      "source": "experiments/logs/EVAL-libero_10-openvla-2026_04_21-07_57_07--rewind_fixed_libero10.episodes.jsonl"
+    },
+    {
+      "suite": "libero_10",
+      "task_id": 1,
+      "task_description": "put both the cream cheese box and the butter in the basket",
+      "episode_idx": 33,
+      "source": "experiments/logs/EVAL-libero_10-openvla-2026_04_21-07_57_07--rewind_fixed_libero10.episodes.jsonl"
+    },
+    {
+      "suite": "libero_10",
+      "task_id": 3,
+      "task_description": "put the black bowl in the bottom drawer of the cabinet and close it",
+      "episode_idx": 14,
+      "source": "experiments/logs/EVAL-libero_10-openvla-2026_04_21-07_57_07--rewind_fixed_libero10.episodes.jsonl"
+    },
+    {
+      "suite": "libero_10",
+      "task_id": 3,
+      "task_description": "put the black bowl in the bottom drawer of the cabinet and close it",
+      "episode_idx": 24,
+      "source": "experiments/logs/EVAL-libero_10-openvla-2026_04_21-07_57_07--rewind_fixed_libero10.episodes.jsonl"
+    },
+    {
+      "suite": "libero_10",
+      "task_id": 3,
+      "task_description": "put the black bowl in the bottom drawer of the cabinet and close it",
+      "episode_idx": 48,
+      "source": "experiments/logs/EVAL-libero_10-openvla-2026_04_21-07_57_07--rewind_fixed_libero10.episodes.jsonl"
+    },
+    {
+      "suite": "libero_10",
+      "task_id": 4,
+      "task_description": "put the white mug on the left plate and put the yellow and white mug on the right plate",
+      "episode_idx": 6,
+      "source": "experiments/logs/EVAL-libero_10-openvla-2026_04_21-07_57_07--rewind_fixed_libero10.episodes.jsonl"
+    },
+    {
+      "suite": "libero_10",
+      "task_id": 4,
+      "task_description": "put the white mug on the left plate and put the yellow and white mug on the right plate",
+      "episode_idx": 15,
+      "source": "experiments/logs/EVAL-libero_10-openvla-2026_04_21-07_57_07--rewind_fixed_libero10.episodes.jsonl"
+    },
+    {
+      "suite": "libero_10",
+      "task_id": 4,
+      "task_description": "put the white mug on the left plate and put the yellow and white mug on the right plate",
+      "episode_idx": 18,
+      "source": "experiments/logs/EVAL-libero_10-openvla-2026_04_21-07_57_07--rewind_fixed_libero10.episodes.jsonl"
+    },
+    {
+      "suite": "libero_10",
+      "task_id": 6,
+      "task_description": "put the white mug on the plate and put the chocolate pudding to the right of the plate",
+      "episode_idx": 5,
+      "source": "experiments/logs/EVAL-libero_10-openvla-2026_04_21-07_57_07--rewind_fixed_libero10.episodes.jsonl"
+    },
+    {
+      "suite": "libero_10",
+      "task_id": 6,
+      "task_description": "put the white mug on the plate and put the chocolate pudding to the right of the plate",
+      "episode_idx": 10,
+      "source": "experiments/logs/EVAL-libero_10-openvla-2026_04_21-07_57_07--rewind_fixed_libero10.episodes.jsonl"
+    },
+    {
+      "suite": "libero_10",
+      "task_id": 6,
+      "task_description": "put the white mug on the plate and put the chocolate pudding to the right of the plate",
+      "episode_idx": 12,
+      "source": "experiments/logs/EVAL-libero_10-openvla-2026_04_21-07_57_07--rewind_fixed_libero10.episodes.jsonl"
+    },
+    {
+      "suite": "libero_10",
+      "task_id": 6,
+      "task_description": "put the white mug on the plate and put the chocolate pudding to the right of the plate",
+      "episode_idx": 14,
+      "source": "experiments/logs/EVAL-libero_10-openvla-2026_04_21-07_57_07--rewind_fixed_libero10.episodes.jsonl"
+    },
+    {
+      "suite": "libero_10",
+      "task_id": 6,
+      "task_description": "put the white mug on the plate and put the chocolate pudding to the right of the plate",
+      "episode_idx": 20,
+      "source": "experiments/logs/EVAL-libero_10-openvla-2026_04_21-07_57_07--rewind_fixed_libero10.episodes.jsonl"
+    },
+    {
+      "suite": "libero_10",
+      "task_id": 6,
+      "task_description": "put the white mug on the plate and put the chocolate pudding to the right of the plate",
+      "episode_idx": 28,
+      "source": "experiments/logs/EVAL-libero_10-openvla-2026_04_21-07_57_07--rewind_fixed_libero10.episodes.jsonl"
+    },
+    {
+      "suite": "libero_10",
+      "task_id": 7,
+      "task_description": "put both the alphabet soup and the cream cheese box in the basket",
+      "episode_idx": 6,
+      "source": "experiments/logs/EVAL-libero_10-openvla-2026_04_21-07_57_07--rewind_fixed_libero10.episodes.jsonl"
+    },
+    {
+      "suite": "libero_10",
+      "task_id": 8,
+      "task_description": "put both moka pots on the stove",
+      "episode_idx": 1,
+      "source": "experiments/logs/EVAL-libero_10-openvla-2026_04_21-07_57_07--rewind_fixed_libero10.episodes.jsonl"
+    },
+    {
+      "suite": "libero_10",
+      "task_id": 8,
+      "task_description": "put both moka pots on the stove",
+      "episode_idx": 4,
+      "source": "experiments/logs/EVAL-libero_10-openvla-2026_04_21-07_57_07--rewind_fixed_libero10.episodes.jsonl"
+    },
+    {
+      "suite": "libero_10",
+      "task_id": 8,
+      "task_description": "put both moka pots on the stove",
+      "episode_idx": 8,
+      "source": "experiments/logs/EVAL-libero_10-openvla-2026_04_21-07_57_07--rewind_fixed_libero10.episodes.jsonl"
+    },
+    {
+      "suite": "libero_10",
+      "task_id": 8,
+      "task_description": "put both moka pots on the stove",
+      "episode_idx": 10,
+      "source": "experiments/logs/EVAL-libero_10-openvla-2026_04_21-07_57_07--rewind_fixed_libero10.episodes.jsonl"
+    },
+    {
+      "suite": "libero_10",
+      "task_id": 8,
+      "task_description": "put both moka pots on the stove",
+      "episode_idx": 12,
+      "source": "experiments/logs/EVAL-libero_10-openvla-2026_04_21-07_57_07--rewind_fixed_libero10.episodes.jsonl"
+    },
+    {
+      "suite": "libero_10",
+      "task_id": 8,
+      "task_description": "put both moka pots on the stove",
+      "episode_idx": 15,
+      "source": "experiments/logs/EVAL-libero_10-openvla-2026_04_21-07_57_07--rewind_fixed_libero10.episodes.jsonl"
+    }
+  ]
+}

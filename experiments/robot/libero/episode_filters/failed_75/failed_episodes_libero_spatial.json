@@ -1,0 +1,237 @@
+{
+  "description": "75-episode failure set used for anchor_sweep / rewind_fixed comparison.",
+  "suite": "libero_spatial",
+  "episodes": [
+    {
+      "suite": "libero_spatial",
+      "task_id": 0,
+      "task_description": "pick up the black bowl between the plate and the ramekin and place it on the plate",
+      "episode_idx": 0,
+      "source": "experiments/logs/EVAL-libero_spatial-openvla-2026_04_21-07_48_29--rewind_fixed_spatial.episodes.jsonl"
+    },
+    {
+      "suite": "libero_spatial",
+      "task_id": 1,
+      "task_description": "pick up the black bowl next to the ramekin and place it on the plate",
+      "episode_idx": 47,
+      "source": "experiments/logs/EVAL-libero_spatial-openvla-2026_04_21-07_48_29--rewind_fixed_spatial.episodes.jsonl"
+    },
+    {
+      "suite": "libero_spatial",
+      "task_id": 4,
+      "task_description": "pick up the black bowl in the top drawer of the wooden cabinet and place it on the plate",
+      "episode_idx": 18,
+      "source": "experiments/logs/EVAL-libero_spatial-openvla-2026_04_21-07_48_29--rewind_fixed_spatial.episodes.jsonl"
+    },
+    {
+      "suite": "libero_spatial",
+      "task_id": 4,
+      "task_description": "pick up the black bowl in the top drawer of the wooden cabinet and place it on the plate",
+      "episode_idx": 19,
+      "source": "experiments/logs/EVAL-libero_spatial-openvla-2026_04_21-07_48_29--rewind_fixed_spatial.episodes.jsonl"
+    },
+    {
+      "suite": "libero_spatial",
+      "task_id": 5,
+      "task_description": "pick up the black bowl on the ramekin and place it on the plate",
+      "episode_idx": 5,
+      "source": "experiments/logs/EVAL-libero_spatial-openvla-2026_04_21-07_48_29--rewind_fixed_spatial.episodes.jsonl"
+    },
+    {
+      "suite": "libero_spatial",
+      "task_id": 5,
+      "task_description": "pick up the black bowl on the ramekin and place it on the plate",
+      "episode_idx": 8,
+      "source": "experiments/logs/EVAL-libero_spatial-openvla-2026_04_21-07_48_29--rewind_fixed_spatial.episodes.jsonl"
+    },
+    {
+      "suite": "libero_spatial",
+      "task_id": 5,
+      "task_description": "pick up the black bowl on the ramekin and place it on the plate",
+      "episode_idx": 10,
+      "source": "experiments/logs/EVAL-libero_spatial-openvla-2026_04_21-07_48_29--rewind_fixed_spatial.episodes.jsonl"
+    },
+    {
+      "suite": "libero_spatial",
+      "task_id": 5,
+      "task_description": "pick up the black bowl on the ramekin and place it on the plate",
+      "episode_idx": 13,
+      "source": "experiments/logs/EVAL-libero_spatial-openvla-2026_04_21-07_48_29--rewind_fixed_spatial.episodes.jsonl"
+    },
+    {
+      "suite": "libero_spatial",
+      "task_id": 5,
+      "task_description": "pick up the black bowl on the ramekin and place it on the plate",
+      "episode_idx": 15,
+      "source": "experiments/logs/EVAL-libero_spatial-openvla-2026_04_21-07_48_29--rewind_fixed_spatial.episodes.jsonl"
+    },
+    {
+      "suite": "libero_spatial",
+      "task_id": 5,
+      "task_description": "pick up the black bowl on the ramekin and place it on the plate",
+      "episode_idx": 16,
+      "source": "experiments/logs/EVAL-libero_spatial-openvla-2026_04_21-07_48_29--rewind_fixed_spatial.episodes.jsonl"
+    },
+    {
+      "suite": "libero_spatial",
+      "task_id": 5,
+      "task_description": "pick up the black bowl on the ramekin and place it on the plate",
+      "episode_idx": 18,
+      "source": "experiments/logs/EVAL-libero_spatial-openvla-2026_04_21-07_48_29--rewind_fixed_spatial.episodes.jsonl"
+    },
+    {
+      "suite": "libero_spatial",
+      "task_id": 5,
+      "task_description": "pick up the black bowl on the ramekin and place it on the plate",
+      "episode_idx": 19,
+      "source": "experiments/logs/EVAL-libero_spatial-openvla-2026_04_21-07_48_29--rewind_fixed_spatial.episodes.jsonl"
+    },
+    {
+      "suite": "libero_spatial",
+      "task_id": 5,
+      "task_description": "pick up the black bowl on the ramekin and place it on the plate",
+      "episode_idx": 20,
+      "source": "experiments/logs/EVAL-libero_spatial-openvla-2026_04_21-07_48_29--rewind_fixed_spatial.episodes.jsonl"
+    },
+    {
+      "suite": "libero_spatial",
+      "task_id": 5,
+      "task_description": "pick up the black bowl on the ramekin and place it on the plate",
+      "episode_idx": 22,
+      "source": "experiments/logs/EVAL-libero_spatial-openvla-2026_04_21-07_48_29--rewind_fixed_spatial.episodes.jsonl"
+    },
+    {
+      "suite": "libero_spatial",
+      "task_id": 5,
+      "task_description": "pick up the black bowl on the ramekin and place it on the plate",
+      "episode_idx": 26,
+      "source": "experiments/logs/EVAL-libero_spatial-openvla-2026_04_21-07_48_29--rewind_fixed_spatial.episodes.jsonl"
+    },
+    {
+      "suite": "libero_spatial",
+      "task_id": 5,
+      "task_description": "pick up the black bowl on the ramekin and place it on the plate",
+      "episode_idx": 27,
+      "source": "experiments/logs/EVAL-libero_spatial-openvla-2026_04_21-07_48_29--rewind_fixed_spatial.episodes.jsonl"
+    },
+    {
+      "suite": "libero_spatial",
+      "task_id": 5,
+      "task_description": "pick up the black bowl on the ramekin and place it on the plate",
+      "episode_idx": 28,
+      "source": "experiments/logs/EVAL-libero_spatial-openvla-2026_04_21-07_48_29--rewind_fixed_spatial.episodes.jsonl"
+    },
+    {
+      "suite": "libero_spatial",
+      "task_id": 5,
+      "task_description": "pick up the black bowl on the ramekin and place it on the plate",
+      "episode_idx": 29,
+      "source": "experiments/logs/EVAL-libero_spatial-openvla-2026_04_21-07_48_29--rewind_fixed_spatial.episodes.jsonl"
+    },
+    {
+      "suite": "libero_spatial",
+      "task_id": 5,
+      "task_description": "pick up the black bowl on the ramekin and place it on the plate",
+      "episode_idx": 32,
+      "source": "experiments/logs/EVAL-libero_spatial-openvla-2026_04_21-07_48_29--rewind_fixed_spatial.episodes.jsonl"
+    },
+    {
+      "suite": "libero_spatial",
+      "task_id": 5,
+      "task_description": "pick up the black bowl on the ramekin and place it on the plate",
+      "episode_idx": 33,
+      "source": "experiments/logs/EVAL-libero_spatial-openvla-2026_04_21-07_48_29--rewind_fixed_spatial.episodes.jsonl"
+    },
+    {
+      "suite": "libero_spatial",
+      "task_id": 5,
+      "task_description": "pick up the black bowl on the ramekin and place it on the plate",
+      "episode_idx": 34,
+      "source": "experiments/logs/EVAL-libero_spatial-openvla-2026_04_21-07_48_29--rewind_fixed_spatial.episodes.jsonl"
+    },
+    {
+      "suite": "libero_spatial",
+      "task_id": 5,
+      "task_description": "pick up the black bowl on the ramekin and place it on the plate",
+      "episode_idx": 36,
+      "source": "experiments/logs/EVAL-libero_spatial-openvla-2026_04_21-07_48_29--rewind_fixed_spatial.episodes.jsonl"
+    },
+    {
+      "suite": "libero_spatial",
+      "task_id": 5,
+      "task_description": "pick up the black bowl on the ramekin and place it on the plate",
+      "episode_idx": 38,
+      "source": "experiments/logs/EVAL-libero_spatial-openvla-2026_04_21-07_48_29--rewind_fixed_spatial.episodes.jsonl"
+    },
+    {
+      "suite": "libero_spatial",
+      "task_id": 5,
+      "task_description": "pick up the black bowl on the ramekin and place it on the plate",
+      "episode_idx": 39,
+      "source": "experiments/logs/EVAL-libero_spatial-openvla-2026_04_21-07_48_29--rewind_fixed_spatial.episodes.jsonl"
+    },
+    {
+      "suite": "libero_spatial",
+      "task_id": 5,
+      "task_description": "pick up the black bowl on the ramekin and place it on the plate",
+      "episode_idx": 40,
+      "source": "experiments/logs/EVAL-libero_spatial-openvla-2026_04_21-07_48_29--rewind_fixed_spatial.episodes.jsonl"
+    },
+    {
+      "suite": "libero_spatial",
+      "task_id": 5,
+      "task_description": "pick up the black bowl on the ramekin and place it on the plate",
+      "episode_idx": 42,
+      "source": "experiments/logs/EVAL-libero_spatial-openvla-2026_04_21-07_48_29--rewind_fixed_spatial.episodes.jsonl"
+    },
+    {
+      "suite": "libero_spatial",
+      "task_id": 5,
+      "task_description": "pick up the black bowl on the ramekin and place it on the plate",
+      "episode_idx": 46,
+      "source": "experiments/logs/EVAL-libero_spatial-openvla-2026_04_21-07_48_29--rewind_fixed_spatial.episodes.jsonl"
+    },
+    {
+      "suite": "libero_spatial",
+      "task_id": 7,
+      "task_description": "pick up the black bowl on the stove and place it on the plate",
+      "episode_idx": 10,
+      "source": "experiments/logs/EVAL-libero_spatial-openvla-2026_04_21-07_48_29--rewind_fixed_spatial.episodes.jsonl"
+    },
+    {
+      "suite": "libero_spatial",
+      "task_id": 7,
+      "task_description": "pick up the black bowl on the stove and place it on the plate",
+      "episode_idx": 42,
+      "source": "experiments/logs/EVAL-libero_spatial-openvla-2026_04_21-07_48_29--rewind_fixed_spatial.episodes.jsonl"
+    },
+    {
+      "suite": "libero_spatial",
+      "task_id": 7,
+      "task_description": "pick up the black bowl on the stove and place it on the plate",
+      "episode_idx": 49,
+      "source": "experiments/logs/EVAL-libero_spatial-openvla-2026_04_21-07_48_29--rewind_fixed_spatial.episodes.jsonl"
+    },
+    {
+      "suite": "libero_spatial",
+      "task_id": 8,
+      "task_description": "pick up the black bowl next to the plate and place it on the plate",
+      "episode_idx": 4,
+      "source": "experiments/logs/EVAL-libero_spatial-openvla-2026_04_21-07_48_29--rewind_fixed_spatial.episodes.jsonl"
+    },
+    {
+      "suite": "libero_spatial",
+      "task_id": 8,
+      "task_description": "pick up the black bowl next to the plate and place it on the plate",
+      "episode_idx": 47,
+      "source": "experiments/logs/EVAL-libero_spatial-openvla-2026_04_21-07_48_29--rewind_fixed_spatial.episodes.jsonl"
+    },
+    {
+      "suite": "libero_spatial",
+      "task_id": 9,
+      "task_description": "pick up the black bowl on the wooden cabinet and place it on the plate",
+      "episode_idx": 12,
+      "source": "experiments/logs/EVAL-libero_spatial-openvla-2026_04_21-07_48_29--rewind_fixed_spatial.episodes.jsonl"
+    }
+  ]
+}

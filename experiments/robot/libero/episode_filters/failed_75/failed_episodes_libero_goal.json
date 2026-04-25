@@ -1,0 +1,125 @@
+{
+  "description": "75-episode failure set used for anchor_sweep / rewind_fixed comparison.",
+  "suite": "libero_goal",
+  "episodes": [
+    {
+      "suite": "libero_goal",
+      "task_id": 0,
+      "task_description": "open the middle drawer of the cabinet",
+      "episode_idx": 38,
+      "source": "experiments/logs/EVAL-libero_goal-openvla-2026_04_21-07_48_20--rewind_fixed_goal.episodes.jsonl"
+    },
+    {
+      "suite": "libero_goal",
+      "task_id": 1,
+      "task_description": "put the bowl on the stove",
+      "episode_idx": 4,
+      "source": "experiments/logs/EVAL-libero_goal-openvla-2026_04_21-07_48_20--rewind_fixed_goal.episodes.jsonl"
+    },
+    {
+      "suite": "libero_goal",
+      "task_id": 2,
+      "task_description": "put the wine bottle on top of the cabinet",
+      "episode_idx": 22,
+      "source": "experiments/logs/EVAL-libero_goal-openvla-2026_04_21-07_48_20--rewind_fixed_goal.episodes.jsonl"
+    },
+    {
+      "suite": "libero_goal",
+      "task_id": 2,
+      "task_description": "put the wine bottle on top of the cabinet",
+      "episode_idx": 40,
+      "source": "experiments/logs/EVAL-libero_goal-openvla-2026_04_21-07_48_20--rewind_fixed_goal.episodes.jsonl"
+    },
+    {
+      "suite": "libero_goal",
+      "task_id": 3,
+      "task_description": "open the top drawer and put the bowl inside",
+      "episode_idx": 0,
+      "source": "experiments/logs/EVAL-libero_goal-openvla-2026_04_21-07_48_20--rewind_fixed_goal.episodes.jsonl"
+    },
+    {
+      "suite": "libero_goal",
+      "task_id": 3,
+      "task_description": "open the top drawer and put the bowl inside",
+      "episode_idx": 8,
+      "source": "experiments/logs/EVAL-libero_goal-openvla-2026_04_21-07_48_20--rewind_fixed_goal.episodes.jsonl"
+    },
+    {
+      "suite": "libero_goal",
+      "task_id": 3,
+      "task_description": "open the top drawer and put the bowl inside",
+      "episode_idx": 9,
+      "source": "experiments/logs/EVAL-libero_goal-openvla-2026_04_21-07_48_20--rewind_fixed_goal.episodes.jsonl"
+    },
+    {
+      "suite": "libero_goal",
+      "task_id": 3,
+      "task_description": "open the top drawer and put the bowl inside",
+      "episode_idx": 17,
+      "source": "experiments/logs/EVAL-libero_goal-openvla-2026_04_21-07_48_20--rewind_fixed_goal.episodes.jsonl"
+    },
+    {
+      "suite": "libero_goal",
+      "task_id": 3,
+      "task_description": "open the top drawer and put the bowl inside",
+      "episode_idx": 20,
+      "source": "experiments/logs/EVAL-libero_goal-openvla-2026_04_21-07_48_20--rewind_fixed_goal.episodes.jsonl"
+    },
+    {
+      "suite": "libero_goal",
+      "task_id": 3,
+      "task_description": "open the top drawer and put the bowl inside",
+      "episode_idx": 32,
+      "source": "experiments/logs/EVAL-libero_goal-openvla-2026_04_21-07_48_20--rewind_fixed_goal.episodes.jsonl"
+    },
+    {
+      "suite": "libero_goal",
+      "task_id": 5,
+      "task_description": "push the plate to the front of the stove",
+      "episode_idx": 6,
+      "source": "experiments/logs/EVAL-libero_goal-openvla-2026_04_21-07_48_20--rewind_fixed_goal.episodes.jsonl"
+    },
+    {
+      "suite": "libero_goal",
+      "task_id": 5,
+      "task_description": "push the plate to the front of the stove",
+      "episode_idx": 42,
+      "source": "experiments/logs/EVAL-libero_goal-openvla-2026_04_21-07_48_20--rewind_fixed_goal.episodes.jsonl"
+    },
+    {
+      "suite": "libero_goal",
+      "task_id": 6,
+      "task_description": "put the cream cheese in the bowl",
+      "episode_idx": 4,
+      "source": "experiments/logs/EVAL-libero_goal-openvla-2026_04_21-07_48_20--rewind_fixed_goal.episodes.jsonl"
+    },
+    {
+      "suite": "libero_goal",
+      "task_id": 6,
+      "task_description": "put the cream cheese in the bowl",
+      "episode_idx": 37,
+      "source": "experiments/logs/EVAL-libero_goal-openvla-2026_04_21-07_48_20--rewind_fixed_goal.episodes.jsonl"
+    },
+    {
+      "suite": "libero_goal",
+      "task_id": 6,
+      "task_description": "put the cream cheese in the bowl",
+      "episode_idx": 41,
+      "source": "experiments/logs/EVAL-libero_goal-openvla-2026_04_21-07_48_20--rewind_fixed_goal.episodes.jsonl"
+    },
+    {
+      "suite": "libero_goal",
+      "task_id": 9,
+      "task_description": "put the wine bottle on the rack",
+      "episode_idx": 8,
+      "source": "experiments/logs/EVAL-libero_goal-openvla-2026_04_21-07_48_20--rewind_fixed_goal.episodes.jsonl"
+    },
+    {
+      "suite": "libero_goal",
+      "task_id": 9,
+      "task_description": "put the wine bottle on the rack",
+      "episode_idx": 15,
+      "source": "experiments/logs/EVAL-libero_goal-openvla-2026_04_21-07_48_20--rewind_fixed_goal.episodes.jsonl"
+    }
+  ]
+}
