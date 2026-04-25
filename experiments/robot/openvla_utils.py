@@ -1,6 +1,8 @@
 """Utils for evaluating OpenVLA or fine-tuned OpenVLA policies."""
 
+import contextlib
 import filecmp
+import fcntl
 import json
 import os
 import shutil
@@ -71,20 +73,25 @@ def update_auto_map(pretrained_checkpoint: str) -> None:
         print(f"Warning: No config.json found at {config_path}")
         return
 
-    # Create timestamped backup
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    backup_path = os.path.join(pretrained_checkpoint, f"config.json.back.{timestamp}")
-    shutil.copy2(config_path, backup_path)
-    print(f"Created backup of original config at: {os.path.abspath(backup_path)}")
-
     # Read and update the config
     with open(config_path, "r") as f:
         config = json.load(f)
 
-    config["auto_map"] = {
+    auto_map = {
         "AutoConfig": "configuration_prismatic.OpenVLAConfig",
         "AutoModelForVision2Seq": "modeling_prismatic.OpenVLAForActionPrediction",
     }
+    if config.get("auto_map") == auto_map:
+        print(f"config.json already has the expected auto_map at: {os.path.abspath(config_path)}")
+        return
+
+    config["auto_map"] = auto_map
+
+    # Create timestamped backup only when a write is actually needed.
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_path = os.path.join(pretrained_checkpoint, f"config.json.back.{timestamp}")
+    shutil.copy2(config_path, backup_path)
+    print(f"Created backup of original config at: {os.path.abspath(backup_path)}")
 
     # Write back the updated config
     with open(config_path, "w") as f:
@@ -94,6 +101,22 @@ def update_auto_map(pretrained_checkpoint: str) -> None:
     print("Changes made:")
     print('  - Set AutoConfig to "configuration_prismatic.OpenVLAConfig"')
     print('  - Set AutoModelForVision2Seq to "modeling_prismatic.OpenVLAForActionPrediction"')
+
+
+@contextlib.contextmanager
+def checkpoint_sync_lock(pretrained_checkpoint: str):
+    """Serialize local checkpoint metadata updates across parallel eval workers."""
+    if not os.path.isdir(pretrained_checkpoint):
+        yield
+        return
+
+    lock_path = os.path.join(pretrained_checkpoint, ".openvla_sync.lock")
+    with open(lock_path, "w") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
 def check_identical_files(path1: Union[str, Path], path2: Union[str, Path]) -> bool:
@@ -274,9 +297,11 @@ def get_vla(cfg: Any) -> torch.nn.Module:
         AutoProcessor.register(OpenVLAConfig, PrismaticProcessor)
         AutoModelForVision2Seq.register(OpenVLAConfig, OpenVLAForActionPrediction)
 
-        # Update config.json and sync model files
-        update_auto_map(cfg.pretrained_checkpoint)
-        check_model_logic_mismatch(cfg.pretrained_checkpoint)
+        # Update config.json and sync model files under a lock because multi-GPU
+        # launches may otherwise rewrite the same local checkpoint concurrently.
+        with checkpoint_sync_lock(cfg.pretrained_checkpoint):
+            update_auto_map(cfg.pretrained_checkpoint)
+            check_model_logic_mismatch(cfg.pretrained_checkpoint)
 
     # Load the model
     vla = AutoModelForVision2Seq.from_pretrained(

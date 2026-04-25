@@ -123,8 +123,8 @@ class GenerateConfig:
     max_steps_override: Optional[int] = None         # If set, overrides suite-specific horizon for each episode
     max_steps_multiplier: float = 1.0                # If set > 1, multiplies suite-specific horizon before eval
     middle_state_step: int = -1                      # If >= 0, trigger a one-off mid-episode reset at this policy step
-    middle_state_time_seconds: Optional[float] = 10.0  # If set, trigger rewind after this many wall-clock control seconds
-    middle_state_repeat_interval_seconds: Optional[float] = None  # If set, trigger additional rewinds at this interval
+    middle_state_time_seconds: Optional[float] = 10.0  # If >= 0, trigger rewind after this many wall-clock control seconds
+    middle_state_repeat_interval_seconds: Optional[float] = None  # If > 0, trigger additional rewinds at this interval
     middle_state_max_resets: int = 1                # Maximum number of mid-episode rewinds to apply
     middle_state_strategy: str = "joint_rewind"      # Reset strategy: "joint_rewind", "anchor_rewind", "critical_rewind", "servo_rewind", "state_restore", "teleport", or "inverse_replay"
     middle_state_settle_steps: int = 5               # Dummy env steps after reset before re-querying the policy
@@ -158,6 +158,7 @@ class GenerateConfig:
     stuck_net_eef_delta_threshold: float = 0.03      # Net EEF displacement threshold across the stale window
     stuck_revisit_scene_threshold: float = 0.04      # Revisit threshold on scene state to confirm stale looping
     stuck_revisit_eef_threshold: float = 0.025       # Revisit threshold on EEF position to confirm stale looping
+    stuck_require_revisit: bool = True               # If False, stale no-progress alone can trigger a rewind
     critical_anchor_pre_stale_margin_steps: int = 8  # How far before stale onset the rollback point must be
     critical_anchor_scene_escape_weight: float = 1.5 # Weight on scene-space distance from stale basin
     critical_anchor_stability_weight: float = 1.0    # Weight on anchor stability cost during rollback-point search
@@ -208,12 +209,13 @@ def validate_config(cfg: GenerateConfig) -> None:
     assert not (
         cfg.episode_filter_path is not None and cfg.rerun_failed_episodes_from is not None
     ), "Specify at most one of episode_filter_path and rerun_failed_episodes_from!"
+    assert cfg.middle_state_time_seconds is None or isinstance(
+        cfg.middle_state_time_seconds, (int, float)
+    ), "middle_state_time_seconds must be numeric when set!"
     assert (
-        cfg.middle_state_time_seconds is None or cfg.middle_state_time_seconds >= 0
-    ), "middle_state_time_seconds must be non-negative when set!"
-    assert (
-        cfg.middle_state_repeat_interval_seconds is None or cfg.middle_state_repeat_interval_seconds > 0
-    ), "middle_state_repeat_interval_seconds must be positive when set!"
+        cfg.middle_state_repeat_interval_seconds is None
+        or isinstance(cfg.middle_state_repeat_interval_seconds, (int, float))
+    ), "middle_state_repeat_interval_seconds must be numeric when set!"
     assert cfg.middle_state_max_resets >= 0, "middle_state_max_resets must be non-negative!"
     assert cfg.middle_state_strategy in {
         "joint_rewind",
@@ -466,13 +468,15 @@ def get_episode_max_steps(cfg: GenerateConfig) -> int:
 def get_middle_state_trigger_step(cfg: GenerateConfig) -> int:
     """Resolve the policy-step index at which middle-state rewind should trigger."""
     if cfg.middle_state_time_seconds is not None:
+        if cfg.middle_state_time_seconds < 0:
+            return -1
         return int(round(cfg.middle_state_time_seconds * cfg.control_freq))
     return cfg.middle_state_step
 
 
 def get_middle_state_repeat_interval_steps(cfg: GenerateConfig) -> Optional[int]:
     """Resolve the policy-step spacing between repeated rewinds."""
-    if cfg.middle_state_repeat_interval_seconds is None:
+    if cfg.middle_state_repeat_interval_seconds is None or cfg.middle_state_repeat_interval_seconds <= 0:
         return None
     return int(round(cfg.middle_state_repeat_interval_seconds * cfg.control_freq))
 
@@ -716,7 +720,7 @@ def detect_stuck_region(
         stale_fraction < 0.8
         or net_scene_delta > cfg.stuck_net_scene_delta_threshold
         or net_eef_delta > cfg.stuck_net_eef_delta_threshold
-        or not is_revisited
+        or (cfg.stuck_require_revisit and not is_revisited)
     ):
         return None
 
@@ -1413,6 +1417,7 @@ def run_episode(
     exploration_steps_remaining = 0
     exploration_rng = np.random.default_rng(cfg.seed)
     exploration_context = None
+    exploration_events = []
     reset_events = []
 
     # Run episode
@@ -1547,7 +1552,7 @@ def run_episode(
 
             # Get action from queue
             action = action_queue.popleft()
-            action, _ = choose_post_rewind_action(
+            action, exploration_metadata = choose_post_rewind_action(
                 cfg,
                 env,
                 np.array(action, copy=True),
@@ -1555,6 +1560,26 @@ def run_episode(
                 exploration_rng,
                 exploration_context,
             )
+            if exploration_metadata is not None:
+                exploration_events.append(
+                    {
+                        "policy_step": int(policy_steps_executed),
+                        "burst_step": int(cfg.post_rewind_exploration_steps - exploration_steps_remaining),
+                        "steps_remaining": int(exploration_steps_remaining),
+                        **{
+                            key: (
+                                bool(value)
+                                if isinstance(value, (bool, np.bool_))
+                                else int(value)
+                                if isinstance(value, (int, np.integer))
+                                else float(value)
+                                if isinstance(value, (float, np.floating))
+                                else value
+                            )
+                            for key, value in exploration_metadata.items()
+                        },
+                    }
+                )
 
             # Process action
             action = process_action(action, cfg.model_family)
@@ -1592,6 +1617,7 @@ def run_episode(
         "error": error_message,
         "timed_out": (not success) and (error_message is None) and (policy_steps_executed >= max_steps),
         "reset_events": reset_events,
+        "exploration_events": exploration_events,
         "num_resets": len(reset_events),
     }
 
@@ -1723,6 +1749,7 @@ def run_task(
             "error": episode_outcome["error"],
             "num_resets": episode_outcome["num_resets"],
             "reset_events": episode_outcome["reset_events"],
+            "exploration_events": episode_outcome["exploration_events"],
             "video_path": video_path,
         }
         write_episode_result(episode_record, episode_results_file)

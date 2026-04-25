@@ -46,12 +46,17 @@ def parse_args() -> argparse.Namespace:
         help="Directory where summaries and per-suite outputs are stored",
     )
     parser.add_argument("--run_note", default="critical_rewind_3x_burst", help="Run note suffix")
-    parser.add_argument("--middle_state_time_seconds", type=float, default=10.0, help="Initial rewind time trigger")
+    parser.add_argument(
+        "--middle_state_time_seconds",
+        type=float,
+        default=-1.0,
+        help="Initial rewind time trigger; negative disables scheduled rewinds",
+    )
     parser.add_argument(
         "--middle_state_repeat_interval_seconds",
         type=float,
-        default=10.0,
-        help="Repeat rewind interval after the first trigger",
+        default=-1.0,
+        help="Repeat rewind interval after the first trigger; non-positive disables scheduled repeats",
     )
     parser.add_argument("--middle_state_max_resets", type=int, default=2, help="Maximum resets per episode")
     parser.add_argument(
@@ -89,6 +94,21 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=20,
         help="Minimum stale suffix length before rewinding",
+    )
+    parser.add_argument(
+        "--stuck_require_revisit",
+        action="store_true",
+        help="Require an explicit state revisit in addition to stale no-progress before rewinding",
+    )
+    parser.add_argument(
+        "--use_failed_episode_filters",
+        action="store_true",
+        help="Evaluate only failed_episodes_<suite>.json records instead of the full suite",
+    )
+    parser.add_argument(
+        "--episode_filter_dir",
+        default=".",
+        help="Directory containing failed_episodes_<suite>.json files when --use_failed_episode_filters is set",
     )
     parser.add_argument(
         "--save_rollout_videos",
@@ -165,6 +185,12 @@ def run_eval(
     episode_results_path: Path,
     summary_results_path: Path,
 ) -> None:
+    episode_filter_path = None
+    if args.use_failed_episode_filters:
+        episode_filter_path = Path(args.episode_filter_dir).resolve() / f"failed_episodes_{suite}.json"
+        if not episode_filter_path.exists():
+            raise FileNotFoundError(f"Missing failed episode filter for {suite}: {episode_filter_path}")
+
     cmd = [
         args.python_bin,
         "experiments/robot/libero/run_libero_eval.py",
@@ -220,7 +246,11 @@ def run_eval(
         str(args.stuck_window_steps),
         "--stuck_min_stale_steps",
         str(args.stuck_min_stale_steps),
+        "--stuck_require_revisit",
+        "True" if args.stuck_require_revisit else "False",
     ]
+    if episode_filter_path is not None:
+        cmd.extend(["--episode_filter_path", str(episode_filter_path)])
     subprocess.run(cmd, cwd=repo_root, env=env, check=True)
 
 
