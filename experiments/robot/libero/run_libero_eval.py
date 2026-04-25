@@ -175,6 +175,7 @@ class GenerateConfig:
     post_rewind_revisit_weight: float = 0.5          # Reward for moving away from recently visited stale states
     post_rewind_action_deviation_weight: float = 0.1 # Penalty on deviating too far from the model action
     post_rewind_anchor_drift_weight: float = 0.1     # Penalty on drifting too far from the selected rollback anchor
+    post_rewind_base_action_penalty: float = 0.0     # Small penalty for the unperturbed candidate during escape bursts
 
     #################################################################################################################
     # Utils
@@ -282,6 +283,7 @@ def validate_config(cfg: GenerateConfig) -> None:
         "post_rewind_action_deviation_weight must be non-negative!"
     )
     assert cfg.post_rewind_anchor_drift_weight >= 0, "post_rewind_anchor_drift_weight must be non-negative!"
+    assert cfg.post_rewind_base_action_penalty >= 0, "post_rewind_base_action_penalty must be non-negative!"
 
     # Validate task suite
     assert cfg.task_suite_name in [suite.value for suite in TaskSuite], f"Invalid task suite: {cfg.task_suite_name}"
@@ -968,6 +970,11 @@ def choose_post_rewind_action(
             candidate_action=candidate_action,
             exploration_context=exploration_context,
         )
+        if idx == 0 and cfg.post_rewind_base_action_penalty > 0:
+            metadata["score_before_base_penalty"] = metadata["score"]
+            metadata["base_action_penalty"] = float(cfg.post_rewind_base_action_penalty)
+            score -= cfg.post_rewind_base_action_penalty
+            metadata["score"] = score
         if score > best_score:
             best_idx = idx
             best_score = score

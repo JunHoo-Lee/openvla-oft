@@ -84,6 +84,12 @@ def parse_args() -> argparse.Namespace:
         help="Number of noisy candidates sampled per burst step",
     )
     parser.add_argument(
+        "--post_rewind_base_action_penalty",
+        type=float,
+        default=0.05,
+        help="Small lookahead-score penalty for selecting the unperturbed base action during escape bursts",
+    )
+    parser.add_argument(
         "--stuck_window_steps",
         type=int,
         default=48,
@@ -242,6 +248,8 @@ def run_eval(
         str(args.post_rewind_action_samples),
         "--post_rewind_escape_lookahead",
         "True",
+        "--post_rewind_base_action_penalty",
+        str(args.post_rewind_base_action_penalty),
         "--stuck_window_steps",
         str(args.stuck_window_steps),
         "--stuck_min_stale_steps",
