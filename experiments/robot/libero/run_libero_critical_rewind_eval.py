@@ -86,8 +86,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--post_rewind_base_action_penalty",
         type=float,
-        default=0.05,
+        default=0.0,
         help="Small lookahead-score penalty for selecting the unperturbed base action during escape bursts",
+    )
+    parser.add_argument(
+        "--post_rewind_score_margin",
+        type=float,
+        default=0.03,
+        help="Noisy burst candidates must beat the base action by this lookahead-score margin",
     )
     parser.add_argument(
         "--stuck_window_steps",
@@ -105,6 +111,24 @@ def parse_args() -> argparse.Namespace:
         "--stuck_require_revisit",
         action="store_true",
         help="Require an explicit state revisit in addition to stale no-progress before rewinding",
+    )
+    parser.add_argument(
+        "--progress_veto_min_delta",
+        type=float,
+        default=0.08,
+        help="Recent scene-progress gain that vetoes recovery even when stale checks pass",
+    )
+    parser.add_argument(
+        "--critical_rewind_progress_loss_weight",
+        type=float,
+        default=0.8,
+        help="Penalty on rolling back useful scene progress during anchor selection",
+    )
+    parser.add_argument(
+        "--critical_rewind_min_advantage",
+        type=float,
+        default=0.10,
+        help="Minimum recovery advantage required before applying a critical rewind",
     )
     parser.add_argument(
         "--use_failed_episode_filters",
@@ -250,12 +274,22 @@ def run_eval(
         "True",
         "--post_rewind_base_action_penalty",
         str(args.post_rewind_base_action_penalty),
+        "--post_rewind_score_margin",
+        str(args.post_rewind_score_margin),
         "--stuck_window_steps",
         str(args.stuck_window_steps),
         "--stuck_min_stale_steps",
         str(args.stuck_min_stale_steps),
         "--stuck_require_revisit",
         "True" if args.stuck_require_revisit else "False",
+        "--progress_veto_min_delta",
+        str(args.progress_veto_min_delta),
+        "--critical_rewind_progress_loss_weight",
+        str(args.critical_rewind_progress_loss_weight),
+        "--critical_rewind_min_advantage",
+        str(args.critical_rewind_min_advantage),
+        "--critical_rewind_require_stale_context",
+        "True",
     ]
     if episode_filter_path is not None:
         cmd.extend(["--episode_filter_path", str(episode_filter_path)])

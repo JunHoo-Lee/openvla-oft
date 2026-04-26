@@ -28,6 +28,11 @@ from libero.libero import benchmark
 from robosuite.controllers.controller_factory import controller_factory
 
 import wandb
+from experiments.robot.libero.critical_rewind_policy import (
+    choose_candidate_with_margin,
+    compute_progress_veto,
+    recovery_gate_decision,
+)
 from experiments.robot.libero.libero_utils import (
     get_libero_dummy_action,
     get_libero_env,
@@ -159,11 +164,15 @@ class GenerateConfig:
     stuck_revisit_scene_threshold: float = 0.04      # Revisit threshold on scene state to confirm stale looping
     stuck_revisit_eef_threshold: float = 0.025       # Revisit threshold on EEF position to confirm stale looping
     stuck_require_revisit: bool = True               # If False, stale no-progress alone can trigger a rewind
+    progress_veto_min_delta: float = 0.08            # Recent scene-progress gain that vetoes recovery
     critical_anchor_pre_stale_margin_steps: int = 8  # How far before stale onset the rollback point must be
     critical_anchor_scene_escape_weight: float = 1.5 # Weight on scene-space distance from stale basin
     critical_anchor_stability_weight: float = 1.0    # Weight on anchor stability cost during rollback-point search
     critical_anchor_age_weight: float = 0.25         # Penalty on rolling too far back in time
     critical_anchor_progress_weight: float = 0.15    # Preference for anchors that had already changed the scene
+    critical_rewind_progress_loss_weight: float = 0.8 # Penalty for rolling back useful scene progress
+    critical_rewind_min_advantage: float = 0.10      # Required rewind advantage before applying recovery
+    critical_rewind_require_stale_context: bool = True # If True, skip scheduled critical rewinds without stale context
     post_rewind_exploration_steps: int = 0           # Number of policy steps to perturb after rewind
     post_rewind_xyz_noise_scale: float = 0.0         # Gaussian noise added to xyz action dims after rewind
     post_rewind_rot_noise_scale: float = 0.0         # Gaussian noise added to rotation action dims after rewind
@@ -176,6 +185,7 @@ class GenerateConfig:
     post_rewind_action_deviation_weight: float = 0.1 # Penalty on deviating too far from the model action
     post_rewind_anchor_drift_weight: float = 0.1     # Penalty on drifting too far from the selected rollback anchor
     post_rewind_base_action_penalty: float = 0.0     # Small penalty for the unperturbed candidate during escape bursts
+    post_rewind_score_margin: float = 0.0            # Noisy action must beat base by this score margin
 
     #################################################################################################################
     # Utils
@@ -262,6 +272,7 @@ def validate_config(cfg: GenerateConfig) -> None:
     assert cfg.stuck_net_eef_delta_threshold >= 0, "stuck_net_eef_delta_threshold must be non-negative!"
     assert cfg.stuck_revisit_scene_threshold >= 0, "stuck_revisit_scene_threshold must be non-negative!"
     assert cfg.stuck_revisit_eef_threshold >= 0, "stuck_revisit_eef_threshold must be non-negative!"
+    assert cfg.progress_veto_min_delta >= 0, "progress_veto_min_delta must be non-negative!"
     assert cfg.critical_anchor_pre_stale_margin_steps >= 0, (
         "critical_anchor_pre_stale_margin_steps must be non-negative!"
     )
@@ -271,6 +282,10 @@ def validate_config(cfg: GenerateConfig) -> None:
     assert cfg.critical_anchor_stability_weight >= 0, "critical_anchor_stability_weight must be non-negative!"
     assert cfg.critical_anchor_age_weight >= 0, "critical_anchor_age_weight must be non-negative!"
     assert cfg.critical_anchor_progress_weight >= 0, "critical_anchor_progress_weight must be non-negative!"
+    assert cfg.critical_rewind_progress_loss_weight >= 0, (
+        "critical_rewind_progress_loss_weight must be non-negative!"
+    )
+    assert cfg.critical_rewind_min_advantage >= 0, "critical_rewind_min_advantage must be non-negative!"
     assert cfg.post_rewind_exploration_steps >= 0, "post_rewind_exploration_steps must be non-negative!"
     assert cfg.post_rewind_xyz_noise_scale >= 0, "post_rewind_xyz_noise_scale must be non-negative!"
     assert cfg.post_rewind_rot_noise_scale >= 0, "post_rewind_rot_noise_scale must be non-negative!"
@@ -284,6 +299,7 @@ def validate_config(cfg: GenerateConfig) -> None:
     )
     assert cfg.post_rewind_anchor_drift_weight >= 0, "post_rewind_anchor_drift_weight must be non-negative!"
     assert cfg.post_rewind_base_action_penalty >= 0, "post_rewind_base_action_penalty must be non-negative!"
+    assert cfg.post_rewind_score_margin >= 0, "post_rewind_score_margin must be non-negative!"
 
     # Validate task suite
     assert cfg.task_suite_name in [suite.value for suite in TaskSuite], f"Invalid task suite: {cfg.task_suite_name}"
@@ -726,6 +742,18 @@ def detect_stuck_region(
     ):
         return None
 
+    progress_veto = compute_progress_veto(
+        [record.get("scene_delta_from_start", 0.0) for record in recent_records],
+        min_delta=cfg.progress_veto_min_delta,
+    )
+    if progress_veto["veto"]:
+        log_message(
+            "[middle_state] stale-state detector vetoed by recent progress "
+            f"(step={current_policy_step}, progress_delta={progress_veto['progress_delta']:.4f}).",
+            log_file,
+        )
+        return None
+
     stale_start_idx = len(recent_records) - cfg.stuck_min_stale_steps
     for start_idx in range(len(recent_records) - cfg.stuck_min_stale_steps + 1):
         suffix_flags = stale_flags[start_idx:]
@@ -743,6 +771,8 @@ def detect_stuck_region(
         "closest_scene_revisit": closest_scene_revisit,
         "closest_eef_revisit": closest_eef_revisit,
         "revisit_step": revisit_record["policy_step"],
+        "progress_delta": float(progress_veto["progress_delta"]),
+        "current_scene_delta_from_start": float(current_record.get("scene_delta_from_start", 0.0)),
         "current_scene_state": np.array(current_record["scene_state"], dtype=np.float64),
         "current_eef_pos": np.array(current_record["eef_pos"], dtype=np.float64),
         "recent_scene_states": [np.array(record["scene_state"], dtype=np.float64) for record in stale_window],
@@ -804,6 +834,7 @@ def select_critical_anchor_record(
     latest_allowed_step = stale_info["stale_start_step"] - cfg.critical_anchor_pre_stale_margin_steps
     current_scene_state = stale_info["current_scene_state"]
     current_eef_pos = stale_info["current_eef_pos"]
+    current_progress = float(stale_info.get("current_scene_delta_from_start", 0.0))
 
     candidates = []
     for record in anchor_buffer:
@@ -818,9 +849,22 @@ def select_critical_anchor_record(
         stability_cost = record["scene_motion"] + cfg.anchor_eef_speed_weight * record["eef_speed"]
         age_penalty = age_steps / max(max_age_steps, 1)
         progress_bonus = record.get("scene_delta_from_start", 0.0)
+        progress_loss = max(0.0, current_progress - progress_bonus)
+        recovery_gate = recovery_gate_decision(
+            scene_escape=scene_escape,
+            eef_escape=eef_escape,
+            progress_loss=progress_loss,
+            stability_cost=stability_cost,
+            scene_escape_weight=cfg.critical_anchor_scene_escape_weight,
+            eef_escape_weight=0.5 * cfg.critical_anchor_scene_escape_weight,
+            progress_loss_weight=cfg.critical_rewind_progress_loss_weight,
+            stability_weight=cfg.critical_anchor_stability_weight,
+            min_advantage=cfg.critical_rewind_min_advantage,
+        )
+        if not recovery_gate["apply"]:
+            continue
         score = (
-            cfg.critical_anchor_scene_escape_weight * (scene_escape + 0.5 * eef_escape)
-            - cfg.critical_anchor_stability_weight * stability_cost
+            recovery_gate["advantage"]
             - cfg.critical_anchor_age_weight * age_penalty
             + cfg.critical_anchor_progress_weight * progress_bonus
         )
@@ -832,15 +876,17 @@ def select_critical_anchor_record(
                 eef_escape,
                 stability_cost,
                 progress_bonus,
+                recovery_gate["advantage"],
+                recovery_gate["progress_loss"],
                 record,
             )
         )
 
     if not candidates:
-        log_message("[middle_state] critical_rewind found no pre-stale anchor; falling back to stable anchor.", log_file)
+        log_message("[middle_state] critical_rewind recovery gate rejected all pre-stale anchors.", log_file)
         return None
 
-    score, age_steps, scene_escape, eef_escape, stability_cost, progress_bonus, record = max(
+    score, age_steps, scene_escape, eef_escape, stability_cost, progress_bonus, recovery_advantage, progress_loss, record = max(
         candidates,
         key=lambda item: (item[0], -item[1]),
     )
@@ -848,9 +894,13 @@ def select_critical_anchor_record(
         "[middle_state] critical_rewind selected anchor "
         f"at step {record['policy_step']} (age_steps={age_steps}, score={score:.4f}, "
         f"scene_escape={scene_escape:.4f}, eef_escape={eef_escape:.4f}, "
-        f"stability_cost={stability_cost:.4f}, progress_bonus={progress_bonus:.4f}).",
+        f"stability_cost={stability_cost:.4f}, progress_bonus={progress_bonus:.4f}, "
+        f"recovery_advantage={recovery_advantage:.4f}, progress_loss={progress_loss:.4f}).",
         log_file,
     )
+    record = dict(record)
+    record["recovery_advantage"] = recovery_advantage
+    record["recovery_progress_loss"] = progress_loss
     return record
 
 
@@ -959,9 +1009,8 @@ def choose_post_rewind_action(
         choice_idx = int(exploration_rng.integers(len(candidates)))
         return candidates[choice_idx], {"choice": choice_idx, "mode": "random_sample"}
 
-    best_idx = 0
-    best_score = -np.inf
-    best_metadata = None
+    candidate_scores = []
+    candidate_metadata = []
     for idx, candidate_action in enumerate(candidates):
         score, metadata = score_exploration_candidate(
             cfg,
@@ -975,15 +1024,17 @@ def choose_post_rewind_action(
             metadata["base_action_penalty"] = float(cfg.post_rewind_base_action_penalty)
             score -= cfg.post_rewind_base_action_penalty
             metadata["score"] = score
-        if score > best_score:
-            best_idx = idx
-            best_score = score
-            best_metadata = metadata
+        candidate_scores.append(score)
+        candidate_metadata.append(metadata)
 
-    if best_metadata is not None:
-        best_metadata["choice"] = best_idx
-        best_metadata["mode"] = "lookahead"
-    return candidates[best_idx], best_metadata
+    choice_idx = choose_candidate_with_margin(candidate_scores, cfg.post_rewind_score_margin)
+    best_metadata = candidate_metadata[choice_idx]
+    best_metadata["choice"] = choice_idx
+    best_metadata["mode"] = "lookahead"
+    best_metadata["base_score"] = float(candidate_scores[0])
+    best_metadata["best_candidate_score"] = float(max(candidate_scores))
+    best_metadata["score_margin"] = float(cfg.post_rewind_score_margin)
+    return candidates[choice_idx], best_metadata
 
 
 def get_joint_state(robot):
@@ -1251,6 +1302,7 @@ def execute_middle_state_reset(
         "trigger_reason": trigger_reason,
         "trigger_step": current_policy_step,
         "strategy": cfg.middle_state_strategy,
+        "applied": True,
     }
     if stale_info is not None:
         reset_metadata.update(
@@ -1260,6 +1312,7 @@ def execute_middle_state_reset(
                 "stale_net_scene_delta": float(stale_info["net_scene_delta"]),
                 "stale_net_eef_delta": float(stale_info["net_eef_delta"]),
                 "stale_revisit_step": int(stale_info["revisit_step"]),
+                "stale_progress_delta": float(stale_info.get("progress_delta", 0.0)),
             }
         )
 
@@ -1293,6 +1346,10 @@ def execute_middle_state_reset(
             return obs, True, reset_metadata, selected_anchor_record
     elif cfg.middle_state_strategy == "critical_rewind":
         log_message("[middle_state] Reset strategy=critical_rewind.", log_file)
+        if stale_info is None and cfg.critical_rewind_require_stale_context:
+            reset_metadata.update({"applied": False, "skip_reason": "missing_stale_context"})
+            log_message("[middle_state] critical_rewind skipped: no stale context passed the progress gate.", log_file)
+            return obs, False, reset_metadata, selected_anchor_record
         selected_anchor_record = select_critical_anchor_record(
             cfg,
             anchor_buffer,
@@ -1300,7 +1357,11 @@ def execute_middle_state_reset(
             stale_info=stale_info,
             log_file=log_file,
         )
-        if selected_anchor_record is None:
+        if selected_anchor_record is None and cfg.critical_rewind_require_stale_context:
+            reset_metadata.update({"applied": False, "skip_reason": "recovery_gate_rejected"})
+            log_message("[middle_state] critical_rewind skipped: recovery gate rejected the rewind.", log_file)
+            return obs, False, reset_metadata, selected_anchor_record
+        elif selected_anchor_record is None:
             selected_anchor_record = select_anchor_record(cfg, anchor_buffer, current_policy_step, log_file=log_file)
         obs, done = physically_rewind_robot_joints(
             cfg,
@@ -1365,6 +1426,8 @@ def execute_middle_state_reset(
                 "anchor_scene_motion": float(selected_anchor_record["scene_motion"]),
                 "anchor_eef_speed": float(selected_anchor_record["eef_speed"]),
                 "anchor_scene_delta_from_start": float(selected_anchor_record.get("scene_delta_from_start", 0.0)),
+                "recovery_advantage": float(selected_anchor_record.get("recovery_advantage", 0.0)),
+                "recovery_progress_loss": float(selected_anchor_record.get("recovery_progress_loss", 0.0)),
             }
         )
 
@@ -1494,29 +1557,41 @@ def run_episode(
                     log_file=log_file,
                 )
                 reset_events.append(reset_metadata)
-                log_message("[middle_state] Finished mid-episode reset.", log_file)
-                if done:
-                    success = True
-                    break
+                reset_applied = reset_metadata.get("applied", True)
+                if reset_applied:
+                    log_message("[middle_state] Finished mid-episode reset.", log_file)
+                    if done:
+                        success = True
+                        break
 
-                # Clear stale action chunks so the VLA policy re-queries from the reset state.
-                action_queue.clear()
-                exploration_steps_remaining = cfg.post_rewind_exploration_steps
-                exploration_context = None
-                if exploration_steps_remaining > 0:
-                    exploration_context = {
-                        "total_steps": cfg.post_rewind_exploration_steps,
-                        "stale_scene_state": None if stale_info is None else np.array(stale_info["current_scene_state"], copy=True),
-                        "stale_eef_pos": None if stale_info is None else np.array(stale_info["current_eef_pos"], copy=True),
-                        "anchor_scene_state": None
-                        if selected_anchor_record is None
-                        else np.array(selected_anchor_record["scene_state"], copy=True),
-                        "recent_scene_states": []
-                        if stale_info is None
-                        else [np.array(scene_state, copy=True) for scene_state in stale_info["recent_scene_states"]],
-                    }
+                    # Clear stale action chunks so the VLA policy re-queries from the reset state.
+                    action_queue.clear()
+                    exploration_steps_remaining = cfg.post_rewind_exploration_steps
+                    exploration_context = None
+                    if exploration_steps_remaining > 0:
+                        exploration_context = {
+                            "total_steps": cfg.post_rewind_exploration_steps,
+                            "stale_scene_state": None
+                            if stale_info is None
+                            else np.array(stale_info["current_scene_state"], copy=True),
+                            "stale_eef_pos": None
+                            if stale_info is None
+                            else np.array(stale_info["current_eef_pos"], copy=True),
+                            "anchor_scene_state": None
+                            if selected_anchor_record is None
+                            else np.array(selected_anchor_record["scene_state"], copy=True),
+                            "recent_scene_states": []
+                            if stale_info is None
+                            else [np.array(scene_state, copy=True) for scene_state in stale_info["recent_scene_states"]],
+                        }
 
-                middle_state_resets_done += 1
+                    middle_state_resets_done += 1
+                else:
+                    log_message(
+                        "[middle_state] Recovery decision skipped reset "
+                        f"(reason={reset_metadata.get('skip_reason', 'unknown')}).",
+                        log_file,
+                    )
                 last_reset_policy_step = policy_steps_executed
                 if scheduled_reset:
                     if (
@@ -1625,7 +1700,8 @@ def run_episode(
         "timed_out": (not success) and (error_message is None) and (policy_steps_executed >= max_steps),
         "reset_events": reset_events,
         "exploration_events": exploration_events,
-        "num_resets": len(reset_events),
+        "num_resets": middle_state_resets_done,
+        "num_recovery_decisions": len(reset_events),
     }
 
 
@@ -1755,6 +1831,7 @@ def run_task(
             "timed_out": episode_outcome["timed_out"],
             "error": episode_outcome["error"],
             "num_resets": episode_outcome["num_resets"],
+            "num_recovery_decisions": episode_outcome["num_recovery_decisions"],
             "reset_events": episode_outcome["reset_events"],
             "exploration_events": episode_outcome["exploration_events"],
             "video_path": video_path,
