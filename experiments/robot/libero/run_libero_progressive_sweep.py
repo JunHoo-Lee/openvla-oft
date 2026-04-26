@@ -31,7 +31,7 @@ from experiments.robot.libero.run_libero_abstention_sweep import (
 
 BASELINE_HORIZONS = [3.0, 4.0]
 PROGRESSIVE_HORIZONS = [3.0, 4.0]
-PROGRESSIVE_MAX_RESETS = [2, 3, 4]
+PROGRESSIVE_MAX_RESETS = [1, 2, 3, 4]
 PROGRESSIVE_LEVELS = [
     ("r", "retreat"),
     ("m", "micro_anchor"),

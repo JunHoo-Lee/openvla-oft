@@ -11,7 +11,7 @@ class ProgressiveSweepTest(unittest.TestCase):
     def test_builds_progressive_ladder_sweep(self):
         configs = build_progressive_sweep_configs()
 
-        self.assertEqual(len(configs), 542)
+        self.assertEqual(len(configs), 722)
         self.assertEqual(len({config["name"] for config in configs}), len(configs))
 
     def test_builds_every_ordered_progressive_ladder(self):
