@@ -30,8 +30,11 @@ from robosuite.controllers.controller_factory import controller_factory
 import wandb
 from experiments.robot.libero.critical_rewind_policy import (
     choose_candidate_with_margin,
+    choose_progressive_reset_mode,
     compute_progress_veto,
+    parse_progressive_levels,
     recovery_gate_decision,
+    should_reset_progressive_ladder,
 )
 from experiments.robot.libero.libero_utils import (
     get_libero_dummy_action,
@@ -131,7 +134,7 @@ class GenerateConfig:
     middle_state_time_seconds: Optional[float] = 10.0  # If >= 0, trigger rewind after this many wall-clock control seconds
     middle_state_repeat_interval_seconds: Optional[float] = None  # If > 0, trigger additional rewinds at this interval
     middle_state_max_resets: int = 1                # Maximum number of mid-episode rewinds to apply
-    middle_state_strategy: str = "joint_rewind"      # Reset strategy: "joint_rewind", "anchor_rewind", "critical_rewind", "servo_rewind", "state_restore", "teleport", or "inverse_replay"
+    middle_state_strategy: str = "joint_rewind"      # Reset strategy: "joint_rewind", "anchor_rewind", "critical_rewind", "progressive_rewind", "servo_rewind", "state_restore", "teleport", or "inverse_replay"
     middle_state_settle_steps: int = 5               # Dummy env steps after reset before re-querying the policy
     middle_state_record_transition: bool = True      # If True, record intermediate reset frames in rollout videos
     middle_state_rewind_max_steps: int = 80          # Max env steps spent physically rewinding the arm
@@ -173,6 +176,15 @@ class GenerateConfig:
     critical_rewind_progress_loss_weight: float = 0.8 # Penalty for rolling back useful scene progress
     critical_rewind_min_advantage: float = 0.10      # Required rewind advantage before applying recovery
     critical_rewind_require_stale_context: bool = True # If True, skip scheduled critical rewinds without stale context
+    progressive_rewind_levels: str = "retreat,micro_anchor,stable_anchor,home" # Comma-separated progressive reset ladder
+    progressive_require_stale_context: bool = True   # If True, skip scheduled progressive rewinds without stale context
+    progressive_retreat_steps: int = 10              # Env steps for the first small upward retreat level
+    progressive_retreat_z: float = 0.06              # Z action used by the small retreat level
+    progressive_micro_anchor_min_seconds: float = 0.5 # Youngest age window for micro-anchor rewind
+    progressive_micro_anchor_max_seconds: float = 2.0 # Oldest age window for micro-anchor rewind
+    progressive_stable_anchor_min_seconds: float = 2.0 # Youngest age window for stable-anchor rewind
+    progressive_stable_anchor_max_seconds: float = 6.0 # Oldest age window for stable-anchor rewind
+    progressive_reset_on_progress_delta: float = 0.08 # Progress gain that resets the ladder to level 0
     post_rewind_exploration_steps: int = 0           # Number of policy steps to perturb after rewind
     post_rewind_xyz_noise_scale: float = 0.0         # Gaussian noise added to xyz action dims after rewind
     post_rewind_rot_noise_scale: float = 0.0         # Gaussian noise added to rotation action dims after rewind
@@ -232,6 +244,7 @@ def validate_config(cfg: GenerateConfig) -> None:
         "joint_rewind",
         "anchor_rewind",
         "critical_rewind",
+        "progressive_rewind",
         "state_restore",
         "servo_rewind",
         "teleport",
@@ -286,6 +299,24 @@ def validate_config(cfg: GenerateConfig) -> None:
         "critical_rewind_progress_loss_weight must be non-negative!"
     )
     assert cfg.critical_rewind_min_advantage >= 0, "critical_rewind_min_advantage must be non-negative!"
+    parse_progressive_levels(cfg.progressive_rewind_levels)
+    assert cfg.progressive_retreat_steps >= 0, "progressive_retreat_steps must be non-negative!"
+    assert cfg.progressive_retreat_z >= 0, "progressive_retreat_z must be non-negative!"
+    assert cfg.progressive_micro_anchor_min_seconds >= 0, (
+        "progressive_micro_anchor_min_seconds must be non-negative!"
+    )
+    assert cfg.progressive_micro_anchor_max_seconds >= cfg.progressive_micro_anchor_min_seconds, (
+        "progressive_micro_anchor_max_seconds must be >= progressive_micro_anchor_min_seconds!"
+    )
+    assert cfg.progressive_stable_anchor_min_seconds >= 0, (
+        "progressive_stable_anchor_min_seconds must be non-negative!"
+    )
+    assert cfg.progressive_stable_anchor_max_seconds >= cfg.progressive_stable_anchor_min_seconds, (
+        "progressive_stable_anchor_max_seconds must be >= progressive_stable_anchor_min_seconds!"
+    )
+    assert cfg.progressive_reset_on_progress_delta >= 0, (
+        "progressive_reset_on_progress_delta must be non-negative!"
+    )
     assert cfg.post_rewind_exploration_steps >= 0, "post_rewind_exploration_steps must be non-negative!"
     assert cfg.post_rewind_xyz_noise_scale >= 0, "post_rewind_xyz_noise_scale must be non-negative!"
     assert cfg.post_rewind_rot_noise_scale >= 0, "post_rewind_rot_noise_scale must be non-negative!"
@@ -787,10 +818,18 @@ def detect_stuck_region(
     return stale_info
 
 
-def select_anchor_record(cfg: GenerateConfig, anchor_buffer, current_policy_step, log_file=None):
-    """Pick a recent stable anchor for partial rewind."""
-    min_age_steps = int(round(cfg.anchor_min_age_seconds * cfg.control_freq))
-    max_age_steps = int(round(cfg.anchor_max_age_seconds * cfg.control_freq))
+def select_anchor_record_in_window(
+    cfg: GenerateConfig,
+    anchor_buffer,
+    current_policy_step,
+    min_age_seconds: float,
+    max_age_seconds: float,
+    label: str,
+    log_file=None,
+):
+    """Pick a stable anchor in a caller-specified age window."""
+    min_age_steps = int(round(min_age_seconds * cfg.control_freq))
+    max_age_steps = int(round(max_age_seconds * cfg.control_freq))
     candidates = []
     for record in anchor_buffer:
         age_steps = current_policy_step - record["policy_step"]
@@ -800,7 +839,11 @@ def select_anchor_record(cfg: GenerateConfig, anchor_buffer, current_policy_step
         candidates.append((stability_cost, age_steps, record))
 
     if not candidates:
-        log_message("[middle_state] anchor_rewind found no valid anchor in the age window; falling back to init pose.", log_file)
+        log_message(
+            f"[middle_state] {label} found no valid anchor in "
+            f"{min_age_seconds:.2f}-{max_age_seconds:.2f}s window.",
+            log_file,
+        )
         return None
 
     if cfg.anchor_selection_strategy == "latest":
@@ -809,12 +852,25 @@ def select_anchor_record(cfg: GenerateConfig, anchor_buffer, current_policy_step
         _, age_steps, record = min(candidates, key=lambda item: (item[0], item[1]))
 
     log_message(
-        "[middle_state] anchor_rewind selected anchor "
+        f"[middle_state] {label} selected anchor "
         f"at step {record['policy_step']} (age_steps={age_steps}, "
         f"scene_motion={record['scene_motion']:.4f}, eef_speed={record['eef_speed']:.4f}).",
         log_file,
     )
     return record
+
+
+def select_anchor_record(cfg: GenerateConfig, anchor_buffer, current_policy_step, log_file=None):
+    """Pick a recent stable anchor for partial rewind."""
+    return select_anchor_record_in_window(
+        cfg,
+        anchor_buffer,
+        current_policy_step,
+        cfg.anchor_min_age_seconds,
+        cfg.anchor_max_age_seconds,
+        "anchor_rewind",
+        log_file=log_file,
+    )
 
 
 def select_critical_anchor_record(
@@ -1281,6 +1337,39 @@ def physically_rewind_robot(
     return obs, False
 
 
+def physically_retreat_robot(
+    cfg: GenerateConfig,
+    env,
+    obs,
+    replay_images,
+    resize_size,
+    log_file=None,
+):
+    """Apply a small local retreat without moving back to a historical pose."""
+    if cfg.progressive_retreat_steps == 0:
+        return obs, False
+
+    for step_idx in range(cfg.progressive_retreat_steps):
+        retreat_action = np.zeros(7, dtype=np.float32)
+        retreat_action[2] = cfg.progressive_retreat_z
+        retreat_action[-1] = -1.0
+        obs, _, done, _ = env.step(retreat_action.tolist())
+        maybe_record_transition_frame(cfg, replay_images, obs, resize_size)
+        if done:
+            log_message(
+                f"[middle_state] progressive retreat terminated the episode at retreat step {step_idx}.",
+                log_file,
+            )
+            return obs, True
+
+    log_message(
+        f"[middle_state] progressive retreat finished after {cfg.progressive_retreat_steps} env steps "
+        f"(z_action={cfg.progressive_retreat_z:.3f}).",
+        log_file,
+    )
+    return obs, False
+
+
 def execute_middle_state_reset(
     cfg: GenerateConfig,
     env,
@@ -1295,6 +1384,7 @@ def execute_middle_state_reset(
     initial_eef_axis_angle,
     stale_info: Optional[Dict[str, Any]] = None,
     trigger_reason: str = "scheduled",
+    progressive_level: int = 0,
     log_file=None,
 ):
     """Apply the configured middle-state reset and return a fresh observation plus done flag."""
@@ -1374,6 +1464,91 @@ def execute_middle_state_reset(
         )
         if done:
             return obs, True, reset_metadata, selected_anchor_record
+    elif cfg.middle_state_strategy == "progressive_rewind":
+        levels = parse_progressive_levels(cfg.progressive_rewind_levels)
+        level_idx, progressive_mode = choose_progressive_reset_mode(levels, progressive_level)
+        reset_metadata.update(
+            {
+                "progressive_level": int(level_idx),
+                "progressive_mode": progressive_mode,
+                "progressive_levels": levels,
+            }
+        )
+        log_message(
+            f"[middle_state] Reset strategy=progressive_rewind level={level_idx} mode={progressive_mode}.",
+            log_file,
+        )
+        if stale_info is None and cfg.progressive_require_stale_context:
+            reset_metadata.update({"applied": False, "skip_reason": "missing_stale_context"})
+            log_message("[middle_state] progressive_rewind skipped: no stale context.", log_file)
+            return obs, False, reset_metadata, selected_anchor_record
+
+        if progressive_mode == "retreat":
+            obs, done = physically_retreat_robot(
+                cfg,
+                env,
+                obs,
+                replay_images,
+                resize_size,
+                log_file=log_file,
+            )
+            if done:
+                return obs, True, reset_metadata, selected_anchor_record
+        elif progressive_mode in {"micro_anchor", "stable_anchor"}:
+            if progressive_mode == "micro_anchor":
+                min_age_seconds = cfg.progressive_micro_anchor_min_seconds
+                max_age_seconds = cfg.progressive_micro_anchor_max_seconds
+            else:
+                min_age_seconds = cfg.progressive_stable_anchor_min_seconds
+                max_age_seconds = cfg.progressive_stable_anchor_max_seconds
+            selected_anchor_record = select_anchor_record_in_window(
+                cfg,
+                anchor_buffer,
+                current_policy_step,
+                min_age_seconds,
+                max_age_seconds,
+                f"progressive_{progressive_mode}",
+                log_file=log_file,
+            )
+            if selected_anchor_record is None:
+                reset_metadata.update({"progressive_fallback": "retreat"})
+                obs, done = physically_retreat_robot(
+                    cfg,
+                    env,
+                    obs,
+                    replay_images,
+                    resize_size,
+                    log_file=log_file,
+                )
+                if done:
+                    return obs, True, reset_metadata, selected_anchor_record
+            else:
+                obs, done = physically_rewind_robot_joints(
+                    cfg,
+                    env,
+                    replay_images,
+                    resize_size,
+                    target_qpos=selected_anchor_record["arm_qpos"],
+                    target_label=f"progressive {progressive_mode} pose",
+                    log_file=log_file,
+                )
+                if done:
+                    return obs, True, reset_metadata, selected_anchor_record
+        elif progressive_mode == "home":
+            obs, done = physically_rewind_robot_joints(
+                cfg,
+                env,
+                replay_images,
+                resize_size,
+                target_qpos=None,
+                target_label="progressive home pose",
+                log_file=log_file,
+            )
+            if done:
+                return obs, True, reset_metadata, selected_anchor_record
+        else:
+            reset_metadata.update({"applied": False, "skip_reason": f"unknown_progressive_mode:{progressive_mode}"})
+            return obs, False, reset_metadata, selected_anchor_record
     elif cfg.middle_state_strategy == "state_restore":
         log_message("[middle_state] Reset strategy=state_restore.", log_file)
         obs = env.regenerate_obs_from_state(initial_sim_state)
@@ -1489,6 +1664,9 @@ def run_episode(
     exploration_context = None
     exploration_events = []
     reset_events = []
+    progressive_levels = parse_progressive_levels(cfg.progressive_rewind_levels)
+    progressive_reset_level = 0
+    progressive_last_reset_progress = 0.0
 
     # Run episode
     success = False
@@ -1512,6 +1690,26 @@ def run_episode(
         )
 
         while policy_steps_executed < max_steps:
+            current_progress = (
+                float(anchor_buffer[-1].get("scene_delta_from_start", 0.0)) if len(anchor_buffer) > 0 else 0.0
+            )
+            if (
+                cfg.middle_state_strategy == "progressive_rewind"
+                and progressive_reset_level > 0
+                and should_reset_progressive_ladder(
+                    current_progress=current_progress,
+                    reference_progress=progressive_last_reset_progress,
+                    threshold=cfg.progressive_reset_on_progress_delta,
+                )
+            ):
+                log_message(
+                    "[middle_state] progressive_rewind ladder reset to level 0 after progress "
+                    f"(current_progress={current_progress:.4f}, "
+                    f"reference={progressive_last_reset_progress:.4f}).",
+                    log_file,
+                )
+                progressive_reset_level = 0
+                progressive_last_reset_progress = current_progress
 
             # --- Middle-state rewind ---
             scheduled_reset = (
@@ -1554,6 +1752,7 @@ def run_episode(
                     initial_eef_axis_angle,
                     stale_info=stale_info,
                     trigger_reason=trigger_reason,
+                    progressive_level=progressive_reset_level,
                     log_file=log_file,
                 )
                 reset_events.append(reset_metadata)
@@ -1586,6 +1785,14 @@ def run_episode(
                         }
 
                     middle_state_resets_done += 1
+                    if cfg.middle_state_strategy == "progressive_rewind":
+                        applied_progress = (
+                            float(stale_info.get("current_scene_delta_from_start", current_progress))
+                            if stale_info is not None
+                            else current_progress
+                        )
+                        progressive_last_reset_progress = applied_progress
+                        progressive_reset_level = min(progressive_reset_level + 1, len(progressive_levels) - 1)
                 else:
                     log_message(
                         "[middle_state] Recovery decision skipped reset "

@@ -2,8 +2,11 @@ import unittest
 
 from experiments.robot.libero.critical_rewind_policy import (
     choose_candidate_with_margin,
+    choose_progressive_reset_mode,
     compute_progress_veto,
+    parse_progressive_levels,
     recovery_gate_decision,
+    should_reset_progressive_ladder,
 )
 
 
@@ -56,6 +59,30 @@ class CriticalRewindPolicyTest(unittest.TestCase):
     def test_candidate_margin_keeps_base_when_noisy_is_not_clearly_better(self):
         self.assertEqual(choose_candidate_with_margin([1.0, 1.02, 0.8], margin=0.05), 0)
         self.assertEqual(choose_candidate_with_margin([1.0, 1.08, 0.8], margin=0.05), 1)
+
+    def test_progressive_levels_parse_and_clamp(self):
+        levels = parse_progressive_levels("retreat, micro_anchor, stable_anchor, home")
+
+        self.assertEqual(levels, ["retreat", "micro_anchor", "stable_anchor", "home"])
+        self.assertEqual(choose_progressive_reset_mode(levels, 0), (0, "retreat"))
+        self.assertEqual(choose_progressive_reset_mode(levels, 2), (2, "stable_anchor"))
+        self.assertEqual(choose_progressive_reset_mode(levels, 99), (3, "home"))
+
+    def test_progressive_ladder_resets_after_real_progress(self):
+        self.assertTrue(
+            should_reset_progressive_ladder(
+                current_progress=1.22,
+                reference_progress=1.10,
+                threshold=0.08,
+            )
+        )
+        self.assertFalse(
+            should_reset_progressive_ladder(
+                current_progress=1.15,
+                reference_progress=1.10,
+                threshold=0.08,
+            )
+        )
 
 
 if __name__ == "__main__":
