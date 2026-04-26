@@ -6,6 +6,7 @@ from small local retreats to farther rewinds only after repeated stale triggers.
 """
 
 import argparse
+import itertools
 import os
 import sys
 from pathlib import Path
@@ -31,38 +32,36 @@ from experiments.robot.libero.run_libero_abstention_sweep import (
 BASELINE_HORIZONS = [3.0, 4.0]
 PROGRESSIVE_HORIZONS = [3.0, 4.0]
 PROGRESSIVE_MAX_RESETS = [2, 3, 4]
+PROGRESSIVE_LEVELS = [
+    ("r", "retreat"),
+    ("m", "micro_anchor"),
+    ("s", "stable_anchor"),
+    ("h", "home"),
+]
+
+
+def build_progressive_ladders() -> Dict[str, str]:
+    """Return every local-to-far progressive ladder, preserving level order."""
+    ladders: Dict[str, str] = {}
+    for width in range(1, len(PROGRESSIVE_LEVELS) + 1):
+        for combo in itertools.combinations(PROGRESSIVE_LEVELS, width):
+            name = "_".join(level[0] for level in combo)
+            spec = ",".join(level[1] for level in combo)
+            ladders[name] = spec
+    return ladders
+
+
 PROGRESSIVE_LADDERS = {
-    "r_m_s_h": "retreat,micro_anchor,stable_anchor,home",
-    "r_m_s": "retreat,micro_anchor,stable_anchor",
-    "m_s_h": "micro_anchor,stable_anchor,home",
-    "r_s_h": "retreat,stable_anchor,home",
+    name: spec
+    for name, spec in sorted(
+        build_progressive_ladders().items(),
+        key=lambda item: (-len(item[0].split("_")), item[0]),
+    )
 }
 
 
 def build_progressive_sweep_configs() -> List[Dict[str, object]]:
     configs: List[Dict[str, object]] = []
-
-    for horizon in BASELINE_HORIZONS:
-        configs.append(
-            {
-                "name": f"nr_h{float_tag(horizon)}",
-                "family": "no_rewind",
-                "args": [
-                    "--max_steps_multiplier",
-                    str(horizon),
-                    "--middle_state_time_seconds",
-                    "-1.0",
-                    "--middle_state_repeat_interval_seconds",
-                    "-1.0",
-                    "--middle_state_max_resets",
-                    "0",
-                    "--middle_state_trigger_on_stuck",
-                    "False",
-                    "--post_rewind_exploration_steps",
-                    "0",
-                ],
-            }
-        )
 
     for ladder_name, ladder_spec in PROGRESSIVE_LADDERS.items():
         for horizon in PROGRESSIVE_HORIZONS:
@@ -117,6 +116,28 @@ def build_progressive_sweep_configs() -> List[Dict[str, object]]:
                                 "args": config_args,
                             }
                         )
+
+    for horizon in BASELINE_HORIZONS:
+        configs.append(
+            {
+                "name": f"nr_h{float_tag(horizon)}",
+                "family": "no_rewind",
+                "args": [
+                    "--max_steps_multiplier",
+                    str(horizon),
+                    "--middle_state_time_seconds",
+                    "-1.0",
+                    "--middle_state_repeat_interval_seconds",
+                    "-1.0",
+                    "--middle_state_max_resets",
+                    "0",
+                    "--middle_state_trigger_on_stuck",
+                    "False",
+                    "--post_rewind_exploration_steps",
+                    "0",
+                ],
+            }
+        )
 
     return configs
 

@@ -1,15 +1,26 @@
 import unittest
 
 from experiments.robot.libero.run_libero_abstention_sweep import DEFAULT_SUITES, expand_suite_jobs
-from experiments.robot.libero.run_libero_progressive_sweep import build_progressive_sweep_configs
+from experiments.robot.libero.run_libero_progressive_sweep import (
+    build_progressive_ladders,
+    build_progressive_sweep_configs,
+)
 
 
 class ProgressiveSweepTest(unittest.TestCase):
     def test_builds_progressive_ladder_sweep(self):
         configs = build_progressive_sweep_configs()
 
-        self.assertEqual(len(configs), 146)
+        self.assertEqual(len(configs), 542)
         self.assertEqual(len({config["name"] for config in configs}), len(configs))
+
+    def test_builds_every_ordered_progressive_ladder(self):
+        ladders = build_progressive_ladders()
+
+        self.assertEqual(len(ladders), 15)
+        self.assertEqual(ladders["r"], "retreat")
+        self.assertEqual(ladders["m_s_h"], "micro_anchor,stable_anchor,home")
+        self.assertEqual(ladders["r_m_s_h"], "retreat,micro_anchor,stable_anchor,home")
 
     def test_progressive_configs_use_progressive_strategy(self):
         configs = {config["name"]: config for config in build_progressive_sweep_configs()}
