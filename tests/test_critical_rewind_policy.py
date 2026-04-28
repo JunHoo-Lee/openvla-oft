@@ -2,6 +2,7 @@ import unittest
 
 from experiments.robot.libero.critical_rewind_policy import (
     choose_candidate_with_margin,
+    choose_moving_average_plateau_index,
     choose_progressive_reset_mode,
     compute_progress_veto,
     parse_progressive_levels,
@@ -59,6 +60,14 @@ class CriticalRewindPolicyTest(unittest.TestCase):
     def test_candidate_margin_keeps_base_when_noisy_is_not_clearly_better(self):
         self.assertEqual(choose_candidate_with_margin([1.0, 1.02, 0.8], margin=0.05), 0)
         self.assertEqual(choose_candidate_with_margin([1.0, 1.08, 0.8], margin=0.05), 1)
+
+    def test_moving_average_plateau_picks_middle_of_stable_region(self):
+        values = [0.6, 0.5, 0.12, 0.09, 0.08, 0.10, 0.11, 0.5]
+
+        self.assertEqual(
+            choose_moving_average_plateau_index(values, window=3, tolerance=0.02),
+            4,
+        )
 
     def test_progressive_levels_parse_and_clamp(self):
         levels = parse_progressive_levels("retreat, micro_anchor, stable_anchor, home")

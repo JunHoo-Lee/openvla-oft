@@ -30,6 +30,7 @@ from robosuite.controllers.controller_factory import controller_factory
 import wandb
 from experiments.robot.libero.critical_rewind_policy import (
     choose_candidate_with_margin,
+    choose_moving_average_plateau_index,
     choose_progressive_reset_mode,
     compute_progress_veto,
     parse_progressive_levels,
@@ -134,7 +135,7 @@ class GenerateConfig:
     middle_state_time_seconds: Optional[float] = 10.0  # If >= 0, trigger rewind after this many wall-clock control seconds
     middle_state_repeat_interval_seconds: Optional[float] = None  # If > 0, trigger additional rewinds at this interval
     middle_state_max_resets: int = 1                # Maximum number of mid-episode rewinds to apply
-    middle_state_strategy: str = "joint_rewind"      # Reset strategy: "joint_rewind", "anchor_rewind", "critical_rewind", "progressive_rewind", "servo_rewind", "state_restore", "teleport", or "inverse_replay"
+    middle_state_strategy: str = "joint_rewind"      # Reset strategy: "joint_rewind", "anchor_rewind", "critical_rewind", "verified_critical_rewind", "progressive_rewind", "servo_rewind", "state_restore", "teleport", or "inverse_replay"
     middle_state_settle_steps: int = 5               # Dummy env steps after reset before re-querying the policy
     middle_state_record_transition: bool = True      # If True, record intermediate reset frames in rollout videos
     middle_state_rewind_max_steps: int = 80          # Max env steps spent physically rewinding the arm
@@ -153,8 +154,10 @@ class GenerateConfig:
     anchor_buffer_seconds: float = 12.0              # How much recent trajectory history to keep for anchor selection
     anchor_min_age_seconds: float = 2.0              # Minimum age of anchor relative to rewind time
     anchor_max_age_seconds: float = 8.0              # Maximum age of anchor relative to rewind time
-    anchor_selection_strategy: str = "min_motion"    # Anchor selector: "min_motion" or "latest"
+    anchor_selection_strategy: str = "min_motion"    # Anchor selector: "min_motion", "latest", or "moving_average"
     anchor_eef_speed_weight: float = 0.5             # Weight on EEF speed when scoring candidate anchors
+    anchor_moving_average_window_steps: int = 12     # Smoothing window for moving-average anchor selection
+    anchor_moving_average_plateau_tolerance: float = 0.01 # Extra smoothed stability cost allowed in the low-motion plateau
     middle_state_trigger_on_stuck: bool = False      # If True, allow stale-state detection to trigger rewind early
     middle_state_min_steps_between_resets: int = 80  # Minimum step gap between repeated rewinds
     stuck_window_steps: int = 48                     # Number of recent policy steps inspected for stale-state detection
@@ -176,6 +179,12 @@ class GenerateConfig:
     critical_rewind_progress_loss_weight: float = 0.8 # Penalty for rolling back useful scene progress
     critical_rewind_min_advantage: float = 0.10      # Required rewind advantage before applying recovery
     critical_rewind_require_stale_context: bool = True # If True, skip scheduled critical rewinds without stale context
+    verified_reset_lookahead_steps: int = 16         # Policy steps used to compare reset vs no-reset before committing
+    verified_reset_min_score_margin: float = 0.05    # Reset branch must beat no-reset branch by this margin
+    verified_reset_progress_weight: float = 1.0      # Lookahead score weight for scene progress from episode start
+    verified_reset_scene_escape_weight: float = 0.25 # Lookahead score weight for escaping the stale scene state
+    verified_reset_eef_escape_weight: float = 0.10   # Lookahead score weight for escaping the stale EEF state
+    verified_reset_success_bonus: float = 10.0       # Lookahead bonus if a branch reaches task success
     progressive_rewind_levels: str = "retreat,micro_anchor,stable_anchor,home" # Comma-separated progressive reset ladder
     progressive_require_stale_context: bool = True   # If True, skip scheduled progressive rewinds without stale context
     progressive_retreat_steps: int = 10              # Env steps for the first small upward retreat level
@@ -244,6 +253,7 @@ def validate_config(cfg: GenerateConfig) -> None:
         "joint_rewind",
         "anchor_rewind",
         "critical_rewind",
+        "verified_critical_rewind",
         "progressive_rewind",
         "state_restore",
         "servo_rewind",
@@ -267,10 +277,14 @@ def validate_config(cfg: GenerateConfig) -> None:
     assert cfg.anchor_max_age_seconds >= cfg.anchor_min_age_seconds, (
         "anchor_max_age_seconds must be >= anchor_min_age_seconds!"
     )
-    assert cfg.anchor_selection_strategy in {"min_motion", "latest"}, (
+    assert cfg.anchor_selection_strategy in {"min_motion", "latest", "moving_average"}, (
         f"Unsupported anchor_selection_strategy: {cfg.anchor_selection_strategy}"
     )
     assert cfg.anchor_eef_speed_weight >= 0, "anchor_eef_speed_weight must be non-negative!"
+    assert cfg.anchor_moving_average_window_steps > 0, "anchor_moving_average_window_steps must be positive!"
+    assert cfg.anchor_moving_average_plateau_tolerance >= 0, (
+        "anchor_moving_average_plateau_tolerance must be non-negative!"
+    )
     assert cfg.middle_state_min_steps_between_resets >= 0, (
         "middle_state_min_steps_between_resets must be non-negative!"
     )
@@ -299,6 +313,12 @@ def validate_config(cfg: GenerateConfig) -> None:
         "critical_rewind_progress_loss_weight must be non-negative!"
     )
     assert cfg.critical_rewind_min_advantage >= 0, "critical_rewind_min_advantage must be non-negative!"
+    assert cfg.verified_reset_lookahead_steps >= 0, "verified_reset_lookahead_steps must be non-negative!"
+    assert cfg.verified_reset_min_score_margin >= 0, "verified_reset_min_score_margin must be non-negative!"
+    assert cfg.verified_reset_progress_weight >= 0, "verified_reset_progress_weight must be non-negative!"
+    assert cfg.verified_reset_scene_escape_weight >= 0, "verified_reset_scene_escape_weight must be non-negative!"
+    assert cfg.verified_reset_eef_escape_weight >= 0, "verified_reset_eef_escape_weight must be non-negative!"
+    assert cfg.verified_reset_success_bonus >= 0, "verified_reset_success_bonus must be non-negative!"
     parse_progressive_levels(cfg.progressive_rewind_levels)
     assert cfg.progressive_retreat_steps >= 0, "progressive_retreat_steps must be non-negative!"
     assert cfg.progressive_retreat_z >= 0, "progressive_retreat_z must be non-negative!"
@@ -818,6 +838,17 @@ def detect_stuck_region(
     return stale_info
 
 
+def choose_moving_average_anchor_candidate(cfg: GenerateConfig, candidates, stability_index: int):
+    """Choose the midpoint of the lowest smoothed stability plateau."""
+    stability_values = [candidate[stability_index] for candidate in candidates]
+    selected_idx = choose_moving_average_plateau_index(
+        stability_values,
+        window=cfg.anchor_moving_average_window_steps,
+        tolerance=cfg.anchor_moving_average_plateau_tolerance,
+    )
+    return candidates[selected_idx]
+
+
 def select_anchor_record_in_window(
     cfg: GenerateConfig,
     anchor_buffer,
@@ -848,6 +879,8 @@ def select_anchor_record_in_window(
 
     if cfg.anchor_selection_strategy == "latest":
         _, age_steps, record = min(candidates, key=lambda item: item[1])
+    elif cfg.anchor_selection_strategy == "moving_average":
+        stability_cost, age_steps, record = choose_moving_average_anchor_candidate(cfg, candidates, 0)
     else:
         _, age_steps, record = min(candidates, key=lambda item: (item[0], item[1]))
 
@@ -942,13 +975,39 @@ def select_critical_anchor_record(
         log_message("[middle_state] critical_rewind recovery gate rejected all pre-stale anchors.", log_file)
         return None
 
-    score, age_steps, scene_escape, eef_escape, stability_cost, progress_bonus, recovery_advantage, progress_loss, record = max(
-        candidates,
-        key=lambda item: (item[0], -item[1]),
-    )
+    if cfg.anchor_selection_strategy == "moving_average":
+        (
+            score,
+            age_steps,
+            scene_escape,
+            eef_escape,
+            stability_cost,
+            progress_bonus,
+            recovery_advantage,
+            progress_loss,
+            record,
+        ) = choose_moving_average_anchor_candidate(cfg, candidates, 4)
+        selector_label = "moving_average"
+    else:
+        (
+            score,
+            age_steps,
+            scene_escape,
+            eef_escape,
+            stability_cost,
+            progress_bonus,
+            recovery_advantage,
+            progress_loss,
+            record,
+        ) = max(
+            candidates,
+            key=lambda item: (item[0], -item[1]),
+        )
+        selector_label = "scored"
     log_message(
         "[middle_state] critical_rewind selected anchor "
-        f"at step {record['policy_step']} (age_steps={age_steps}, score={score:.4f}, "
+        f"at step {record['policy_step']} with selector={selector_label} "
+        f"(age_steps={age_steps}, score={score:.4f}, "
         f"scene_escape={scene_escape:.4f}, eef_escape={eef_escape:.4f}, "
         f"stability_cost={stability_cost:.4f}, progress_bonus={progress_bonus:.4f}, "
         f"recovery_advantage={recovery_advantage:.4f}, progress_loss={progress_loss:.4f}).",
@@ -1091,6 +1150,204 @@ def choose_post_rewind_action(
     best_metadata["best_candidate_score"] = float(max(candidate_scores))
     best_metadata["score_margin"] = float(cfg.post_rewind_score_margin)
     return candidates[choice_idx], best_metadata
+
+
+def snapshot_env_state(env):
+    """Capture the simulator/controller state needed for temporary branch rollouts."""
+    return {
+        "sim_state": env.sim.get_state(),
+        "qvel": np.array(env.sim.data.qvel, copy=True),
+    }
+
+
+def restore_env_state(env, snapshot) -> None:
+    env.sim.set_state(snapshot["sim_state"])
+    env.sim.forward()
+    env.sim.data.qvel[:] = snapshot["qvel"]
+    robot = env.robots[0]
+    if hasattr(robot, "controller") and robot.controller is not None:
+        robot.controller.update(force=True)
+        if hasattr(robot.controller, "reset_goal"):
+            robot.controller.reset_goal()
+    env.env._update_observables(force=True)
+
+
+def score_verified_reset_branch(
+    cfg: GenerateConfig,
+    obs,
+    *,
+    done: bool,
+    episode_start_scene_state,
+    stale_info: Optional[Dict[str, Any]],
+) -> Dict[str, float | bool]:
+    scene_state = get_scene_state_vector(obs)
+    eef_pos, _ = get_eef_state(obs)
+    progress = compute_vector_distance(scene_state, episode_start_scene_state)
+    stale_scene_state = None if stale_info is None else stale_info.get("current_scene_state")
+    stale_eef_pos = None if stale_info is None else stale_info.get("current_eef_pos")
+    scene_escape = compute_vector_distance(scene_state, stale_scene_state)
+    eef_escape = compute_vector_distance(eef_pos, stale_eef_pos)
+    score = (
+        cfg.verified_reset_progress_weight * progress
+        + cfg.verified_reset_scene_escape_weight * scene_escape
+        + cfg.verified_reset_eef_escape_weight * eef_escape
+    )
+    if done:
+        score += cfg.verified_reset_success_bonus
+    return {
+        "score": float(score),
+        "progress": float(progress),
+        "scene_escape": float(scene_escape),
+        "eef_escape": float(eef_escape),
+        "would_succeed": bool(done),
+    }
+
+
+def simulate_policy_lookahead(
+    cfg: GenerateConfig,
+    env,
+    obs,
+    task_description: str,
+    model,
+    resize_size,
+    *,
+    processor=None,
+    action_head=None,
+    proprio_projector=None,
+    noisy_action_projector=None,
+):
+    """Roll the policy forward for a short branch without recording frames."""
+    branch_obs = obs
+    branch_done = False
+    branch_action_queue = deque(maxlen=cfg.num_open_loop_steps)
+    for _ in range(cfg.verified_reset_lookahead_steps):
+        observation, _ = prepare_observation(branch_obs, resize_size)
+        if len(branch_action_queue) == 0:
+            actions = get_action(
+                cfg,
+                model,
+                observation,
+                task_description,
+                processor=processor,
+                action_head=action_head,
+                proprio_projector=proprio_projector,
+                noisy_action_projector=noisy_action_projector,
+                use_film=cfg.use_film,
+            )
+            branch_action_queue.extend(actions)
+        action = process_action(np.array(branch_action_queue.popleft(), copy=True), cfg.model_family)
+        branch_obs, _, branch_done, _ = env.step(action.tolist())
+        if branch_done:
+            break
+    return branch_obs, branch_done
+
+
+def verify_reset_candidate_before_commit(
+    cfg: GenerateConfig,
+    env,
+    obs,
+    task_description: str,
+    model,
+    resize_size,
+    selected_anchor_record,
+    stale_info: Optional[Dict[str, Any]],
+    episode_start_scene_state,
+    *,
+    processor=None,
+    action_head=None,
+    proprio_projector=None,
+    noisy_action_projector=None,
+    log_file=None,
+):
+    """Compare no-reset and reset branches before committing to a critical rewind."""
+    if cfg.verified_reset_lookahead_steps == 0:
+        return True, {"mode": "disabled", "accepted": True}
+
+    if selected_anchor_record is None:
+        return False, {"mode": "verified_critical_rewind", "accepted": False, "skip_reason": "missing_anchor"}
+
+    base_snapshot = snapshot_env_state(env)
+    try:
+        no_reset_obs, no_reset_done = simulate_policy_lookahead(
+            cfg,
+            env,
+            obs,
+            task_description,
+            model,
+            resize_size,
+            processor=processor,
+            action_head=action_head,
+            proprio_projector=proprio_projector,
+            noisy_action_projector=noisy_action_projector,
+        )
+        no_reset_score = score_verified_reset_branch(
+            cfg,
+            no_reset_obs,
+            done=no_reset_done,
+            episode_start_scene_state=episode_start_scene_state,
+            stale_info=stale_info,
+        )
+    finally:
+        restore_env_state(env, base_snapshot)
+
+    reset_snapshot = snapshot_env_state(env)
+    try:
+        temp_replay_images = []
+        reset_obs, reset_done = physically_rewind_robot_joints(
+            cfg,
+            env,
+            temp_replay_images,
+            resize_size,
+            target_qpos=selected_anchor_record["arm_qpos"],
+            target_label="verified critical anchor pose",
+            log_file=None,
+        )
+        for _ in range(cfg.middle_state_settle_steps):
+            reset_obs, _, settle_done, _ = env.step(get_libero_dummy_action(cfg.model_family))
+            reset_done = reset_done or settle_done
+            if reset_done:
+                break
+        if not reset_done:
+            reset_obs, reset_done = simulate_policy_lookahead(
+                cfg,
+                env,
+                reset_obs,
+                task_description,
+                model,
+                resize_size,
+                processor=processor,
+                action_head=action_head,
+                proprio_projector=proprio_projector,
+                noisy_action_projector=noisy_action_projector,
+            )
+        reset_score = score_verified_reset_branch(
+            cfg,
+            reset_obs,
+            done=reset_done,
+            episode_start_scene_state=episode_start_scene_state,
+            stale_info=stale_info,
+        )
+    finally:
+        restore_env_state(env, reset_snapshot)
+
+    margin = float(reset_score["score"]) - float(no_reset_score["score"])
+    accepted = margin >= cfg.verified_reset_min_score_margin
+    metadata = {
+        "mode": "verified_critical_rewind",
+        "accepted": bool(accepted),
+        "lookahead_steps": int(cfg.verified_reset_lookahead_steps),
+        "score_margin": float(margin),
+        "required_margin": float(cfg.verified_reset_min_score_margin),
+        "no_reset_score": no_reset_score,
+        "reset_score": reset_score,
+    }
+    log_message(
+        "[middle_state] verified_critical_rewind branch check "
+        f"accepted={accepted} margin={margin:.4f} "
+        f"reset_score={reset_score['score']:.4f} no_reset_score={no_reset_score['score']:.4f}.",
+        log_file,
+    )
+    return accepted, metadata
 
 
 def get_joint_state(robot):
@@ -1374,6 +1631,8 @@ def execute_middle_state_reset(
     cfg: GenerateConfig,
     env,
     obs,
+    task_description,
+    model,
     executed_actions,
     anchor_buffer,
     current_policy_step,
@@ -1385,6 +1644,11 @@ def execute_middle_state_reset(
     stale_info: Optional[Dict[str, Any]] = None,
     trigger_reason: str = "scheduled",
     progressive_level: int = 0,
+    processor=None,
+    action_head=None,
+    proprio_projector=None,
+    noisy_action_projector=None,
+    episode_start_scene_state=None,
     log_file=None,
 ):
     """Apply the configured middle-state reset and return a fresh observation plus done flag."""
@@ -1434,8 +1698,8 @@ def execute_middle_state_reset(
         )
         if done:
             return obs, True, reset_metadata, selected_anchor_record
-    elif cfg.middle_state_strategy == "critical_rewind":
-        log_message("[middle_state] Reset strategy=critical_rewind.", log_file)
+    elif cfg.middle_state_strategy in {"critical_rewind", "verified_critical_rewind"}:
+        log_message(f"[middle_state] Reset strategy={cfg.middle_state_strategy}.", log_file)
         if stale_info is None and cfg.critical_rewind_require_stale_context:
             reset_metadata.update({"applied": False, "skip_reason": "missing_stale_context"})
             log_message("[middle_state] critical_rewind skipped: no stale context passed the progress gate.", log_file)
@@ -1453,6 +1717,28 @@ def execute_middle_state_reset(
             return obs, False, reset_metadata, selected_anchor_record
         elif selected_anchor_record is None:
             selected_anchor_record = select_anchor_record(cfg, anchor_buffer, current_policy_step, log_file=log_file)
+        if cfg.middle_state_strategy == "verified_critical_rewind":
+            accepted, verification_metadata = verify_reset_candidate_before_commit(
+                cfg,
+                env,
+                obs,
+                task_description,
+                model,
+                resize_size,
+                selected_anchor_record,
+                stale_info,
+                episode_start_scene_state,
+                processor=processor,
+                action_head=action_head,
+                proprio_projector=proprio_projector,
+                noisy_action_projector=noisy_action_projector,
+                log_file=log_file,
+            )
+            reset_metadata["verification"] = verification_metadata
+            if not accepted:
+                reset_metadata.update({"applied": False, "skip_reason": "verification_rejected"})
+                log_message("[middle_state] verified_critical_rewind skipped: branch check rejected reset.", log_file)
+                return obs, False, reset_metadata, selected_anchor_record
         obs, done = physically_rewind_robot_joints(
             cfg,
             env,
@@ -1742,6 +2028,8 @@ def run_episode(
                     cfg,
                     env,
                     obs,
+                    task_description,
+                    model,
                     executed_actions,
                     anchor_buffer,
                     policy_steps_executed,
@@ -1753,6 +2041,11 @@ def run_episode(
                     stale_info=stale_info,
                     trigger_reason=trigger_reason,
                     progressive_level=progressive_reset_level,
+                    processor=processor,
+                    action_head=action_head,
+                    proprio_projector=proprio_projector,
+                    noisy_action_projector=noisy_action_projector,
+                    episode_start_scene_state=episode_start_scene_state,
                     log_file=log_file,
                 )
                 reset_events.append(reset_metadata)

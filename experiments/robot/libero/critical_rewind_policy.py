@@ -64,6 +64,42 @@ def choose_candidate_with_margin(scores: Sequence[float], margin: float) -> int:
     return 0
 
 
+def choose_moving_average_plateau_index(
+    values: Sequence[float],
+    *,
+    window: int,
+    tolerance: float,
+) -> int:
+    """Choose the midpoint of the lowest smoothed plateau."""
+    if not values:
+        raise ValueError("values must contain at least one item")
+
+    numeric_values = [float(value) for value in values]
+    window = max(1, min(int(window), len(numeric_values)))
+    half_window = window // 2
+    smoothed = []
+    for idx in range(len(numeric_values)):
+        lo = max(0, idx - half_window)
+        hi = min(len(numeric_values), idx + half_window + 1)
+        smoothed.append(sum(numeric_values[lo:hi]) / max(1, hi - lo))
+
+    min_value = min(smoothed)
+    plateau_flags = [value <= min_value + float(tolerance) for value in smoothed]
+    runs = []
+    start = None
+    for idx, is_plateau in enumerate(plateau_flags + [False]):
+        if is_plateau and start is None:
+            start = idx
+        elif not is_plateau and start is not None:
+            end = idx - 1
+            avg_value = sum(smoothed[start : end + 1]) / (end - start + 1)
+            runs.append((start, end, avg_value))
+            start = None
+
+    best_start, best_end, _ = min(runs, key=lambda run: (run[2], -1 * (run[1] - run[0] + 1), run[0]))
+    return (best_start + best_end) // 2
+
+
 def parse_progressive_levels(level_spec: str) -> List[str]:
     """Parse and validate a comma-separated progressive reset ladder."""
     levels = [level.strip() for level in str(level_spec).split(",") if level.strip()]
